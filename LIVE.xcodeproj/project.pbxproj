@@ -401,6 +401,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "L!V!N";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "L!V!N uses your camera to create live snaps at events and places you visit.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "L!V!N uses your location to pin live snaps exactly where you took them.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L!V!N lets you choose a photo when the camera is not available.";
@@ -437,6 +439,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "L!V!N";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "L!V!N uses your camera to create live snaps at events and places you visit.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "L!V!N uses your location to pin live snaps exactly where you took them.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L!V!N lets you choose a photo when the camera is not available.";

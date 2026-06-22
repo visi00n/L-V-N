@@ -1229,7 +1229,11 @@ private struct SnapPhotoPin: View {
                     .font(.system(size: 13, weight: .black))
                     .foregroundStyle(Color.liveInk)
                     .frame(width: 28, height: 28)
-                    .background(Color.white, in: Circle())
+                    .background(Color.liveSurfaceElevated, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color.liveStroke, lineWidth: 1)
+                    }
                     .offset(x: 10, y: -10)
             }
 
@@ -1276,7 +1280,11 @@ private struct SnapDetailView: View {
                             .foregroundStyle(Color.liveInk)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
-                            .background(Color.white.opacity(0.88), in: Capsule())
+                            .background(Color.liveSurfaceElevated.opacity(0.92), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color.liveStroke, lineWidth: 1)
+                            }
                             .padding(12)
                     }
                 }
@@ -1344,7 +1352,11 @@ private struct SnapDetailView: View {
                                     .font(.system(size: 14, weight: .black))
                                     .foregroundStyle(Color.liveInk)
                                     .frame(width: 38, height: 38)
-                                    .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8))
+                                    .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.liveStroke, lineWidth: 1)
+                                    }
                             }
                             .buttonStyle(.plain)
                         }
@@ -1476,6 +1488,7 @@ private struct CreateSnapView: View {
 
                         TextEditor(text: $caption)
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
                             .frame(minHeight: 112)
                             .padding(10)
                             .scrollContentBackground(.hidden)
@@ -1532,7 +1545,7 @@ private struct CreateSnapView: View {
                     } label: {
                         Text("Post live snap")
                             .font(.system(size: 16, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.white)
+                            .foregroundStyle(Color.liveOnInk)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
                             .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 8))
@@ -1553,6 +1566,7 @@ private struct CreateSnapView: View {
                 }
             }
         }
+        .tint(Color.liveInk)
         .onAppear {
             locationStore.requestLocation()
         }
@@ -1643,7 +1657,7 @@ private struct YesNoButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .black, design: .rounded))
-                .foregroundStyle(isSelected ? Color.white : Color.liveInk)
+                .foregroundStyle(isSelected ? Color.liveOnInk : Color.liveInk)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
                 .background(isSelected ? AnyShapeStyle(Color.liveInk) : AnyShapeStyle(Color.liveSurface), in: RoundedRectangle(cornerRadius: 8))
@@ -2266,6 +2280,10 @@ private extension Color {
     static let liveInk = dynamicColor(
         light: UIColor(red: 0.05, green: 0.07, blue: 0.17, alpha: 1),
         dark: UIColor(red: 0.94, green: 0.96, blue: 1.0, alpha: 1)
+    )
+    static let liveOnInk = dynamicColor(
+        light: UIColor.white,
+        dark: UIColor(red: 0.035, green: 0.045, blue: 0.11, alpha: 1)
     )
     static let liveMuted = dynamicColor(
         light: UIColor(red: 0.35, green: 0.38, blue: 0.53, alpha: 1),
