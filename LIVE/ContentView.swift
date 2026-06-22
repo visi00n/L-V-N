@@ -743,80 +743,59 @@ private struct HomeEventsView: View {
     let onToggleJoin: (LiveEvent) -> Void
 
     @State private var expandedEntryID: String?
-    @State private var focusedWheelEntryID: String?
-    @State private var wheelHaptic = UISelectionFeedbackGenerator()
+    @State private var tapHaptic = UISelectionFeedbackGenerator()
+    @State private var scrollHaptic = UISelectionFeedbackGenerator()
 
-    private var baseWheelEvents: [LiveEvent] {
+    private var visibleEvents: [LiveEvent] {
         guard !events.isEmpty else { return [] }
         return Array(events.prefix(20))
     }
 
-    private var wheelEntries: [EventDeckEntry] {
-        baseWheelEvents.map { event in
+    private var eventEntries: [EventDeckEntry] {
+        visibleEvents.map { event in
             EventDeckEntry(id: event.id, event: event)
         }
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let containerFrame = geometry.frame(in: .global)
-            let focusY = containerFrame.minY + geometry.size.height * 0.46
-
-            ZStack(alignment: .top) {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 12) {
-                        ForEach(wheelEntries) { entry in
-                            EventCarouselCard(
-                                entry: entry,
-                                focusY: focusY,
-                                isJoined: joinedEventIDs.contains(entry.event.id),
-                                isExpanded: expandedEntryID == entry.id,
-                                onToggleDetails: {
-                                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
-                                        expandedEntryID = expandedEntryID == entry.id ? nil : entry.id
-                                    }
-                                },
-                                onRoute: { onRoute(entry.event) },
-                                onToggleJoin: { onToggleJoin(entry.event) }
-                            )
-                            .id(entry.id)
-                        }
+        ZStack(alignment: .top) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 7) {
+                    ForEach(eventEntries) { entry in
+                        EventFeedCard(
+                            event: entry.event,
+                            isJoined: joinedEventIDs.contains(entry.event.id),
+                            isShowingDetails: expandedEntryID == entry.id,
+                            onToggleDetails: {
+                                tapHaptic.selectionChanged()
+                                tapHaptic.prepare()
+                                withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                                    expandedEntryID = expandedEntryID == entry.id ? nil : entry.id
+                                }
+                            },
+                            onRoute: { onRoute(entry.event) },
+                            onToggleJoin: { onToggleJoin(entry.event) }
+                        )
+                        .id(entry.id)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 132)
-                    .padding(.bottom, 150)
-                    .scrollTargetLayout()
                 }
-                .scrollTargetBehavior(.viewAligned)
-
-                EventWheelSelectionSlot()
-                    .frame(height: 176)
-                    .padding(.horizontal, 8)
-                    .position(x: geometry.size.width / 2, y: focusY - containerFrame.minY)
-                    .allowsHitTesting(false)
+                .padding(.horizontal, 16)
+                .padding(.top, 126)
+                .padding(.bottom, 150)
             }
-            .background(BrandBackdrop())
-            .onAppear {
-                wheelHaptic.prepare()
-            }
-            .onPreferenceChange(EventWheelCenterPreferenceKey.self) { snapshots in
-                handleWheelCenterChange(snapshots)
+            .onScrollGeometryChange(for: Int.self) { geometry in
+                Int(max(0, geometry.contentOffset.y) / 82)
+            } action: { oldTick, newTick in
+                guard oldTick != newTick else { return }
+                scrollHaptic.selectionChanged()
+                scrollHaptic.prepare()
             }
         }
-    }
-
-    private func handleWheelCenterChange(_ snapshots: [EventWheelCenterSnapshot]) {
-        guard let closest = snapshots.min(by: { $0.distance < $1.distance }), closest.distance < 120 else { return }
-
-        if focusedWheelEntryID == nil {
-            focusedWheelEntryID = closest.id
-            return
-        }
-
-        if focusedWheelEntryID != closest.id {
-            focusedWheelEntryID = closest.id
-            wheelHaptic.selectionChanged()
-            wheelHaptic.prepare()
+        .background(BrandBackdrop())
+        .onAppear {
+            tapHaptic.prepare()
+            scrollHaptic.prepare()
         }
     }
 }
@@ -824,143 +803,6 @@ private struct HomeEventsView: View {
 private struct EventDeckEntry: Identifiable {
     let id: String
     let event: LiveEvent
-}
-
-private struct EventWheelCenterSnapshot: Equatable {
-    let id: String
-    let eventID: String
-    let distance: CGFloat
-}
-
-private struct EventWheelCenterPreferenceKey: PreferenceKey {
-    static var defaultValue: [EventWheelCenterSnapshot] = []
-
-    static func reduce(value: inout [EventWheelCenterSnapshot], nextValue: () -> [EventWheelCenterSnapshot]) {
-        value += nextValue()
-    }
-}
-
-private struct EventWheelSelectionSlot: View {
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.liveInk.opacity(0.055), lineWidth: 1)
-
-            VStack(spacing: 0) {
-                EventWheelRail()
-                Spacer()
-                EventWheelRail()
-            }
-            .padding(.horizontal, 26)
-
-            HStack {
-                EventWheelTickColumn()
-                Spacer()
-                EventWheelTickColumn()
-            }
-            .padding(.horizontal, 5)
-        }
-    }
-}
-
-private struct EventWheelRail: View {
-    var body: some View {
-        RoundedRectangle(cornerRadius: 1)
-            .fill(Color.liveInk.opacity(0.045))
-            .frame(height: 1)
-    }
-}
-
-private struct EventWheelTickColumn: View {
-    private let widths: [CGFloat] = [8, 14, 22, 30, 22, 14, 8]
-
-    var body: some View {
-        VStack(spacing: 10) {
-            ForEach(Array(widths.enumerated()), id: \.offset) { _, width in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.liveInk.opacity(0.11))
-                    .frame(width: width, height: 2)
-            }
-        }
-        .frame(width: 32)
-    }
-}
-
-private struct EventCarouselCard: View {
-    let entry: EventDeckEntry
-    let focusY: CGFloat
-    let isJoined: Bool
-    let isExpanded: Bool
-    let onToggleDetails: () -> Void
-    let onRoute: () -> Void
-    let onToggleJoin: () -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            let frame = proxy.frame(in: .global)
-            let metrics = isExpanded ? CarouselMetrics.focused : carouselMetrics(for: proxy)
-
-            EventFeedCard(
-                event: entry.event,
-                isJoined: isJoined,
-                isShowingDetails: isExpanded,
-                onToggleDetails: onToggleDetails,
-                onRoute: onRoute,
-                onToggleJoin: onToggleJoin
-            )
-            .scaleEffect(metrics.scale)
-            .opacity(metrics.opacity)
-            .blur(radius: metrics.blur)
-            .offset(y: metrics.offset)
-            .zIndex(metrics.zIndex)
-            .frame(maxWidth: .infinity, alignment: .top)
-            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: metrics.scale)
-            .preference(
-                key: EventWheelCenterPreferenceKey.self,
-                value: [
-                    EventWheelCenterSnapshot(
-                        id: entry.id,
-                        eventID: entry.event.id,
-                        distance: abs(frame.midY - focusY)
-                    )
-                ]
-            )
-        }
-        .frame(height: isExpanded ? 272 : 170)
-        .animation(.spring(response: 0.36, dampingFraction: 0.88), value: isExpanded)
-    }
-
-    private func carouselMetrics(for proxy: GeometryProxy) -> CarouselMetrics {
-        let frame = proxy.frame(in: .global)
-        let rawProgress = (frame.midY - focusY) / 178
-        let progress = min(max(rawProgress, -1.65), 1.65)
-        let distance = abs(progress)
-        let centerLift = max(0, 1 - distance) * 0.032
-
-        return CarouselMetrics(
-            scale: 1.018 + centerLift - min(distance * 0.075, 0.16),
-            opacity: 1 - min(distance * 0.14, 0.36),
-            blur: min(distance * 0.12, 0.34),
-            offset: distance * 1.2,
-            zIndex: 20 - distance
-        )
-    }
-}
-
-private struct CarouselMetrics: Equatable {
-    let scale: CGFloat
-    let opacity: Double
-    let blur: CGFloat
-    let offset: CGFloat
-    let zIndex: Double
-
-    static let focused = CarouselMetrics(
-        scale: 1.052,
-        opacity: 1,
-        blur: 0,
-        offset: 0,
-        zIndex: 20
-    )
 }
 
 private struct EventFeedCard: View {
@@ -972,7 +814,7 @@ private struct EventFeedCard: View {
     let onToggleJoin: () -> Void
 
     var body: some View {
-        ZStack(alignment: .top) {
+        Group {
             if isShowingDetails {
                 EventBackCard(
                     event: event,
@@ -981,14 +823,12 @@ private struct EventFeedCard: View {
                     onRoute: onRoute,
                     onToggleJoin: onToggleJoin
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                 .accessibilityAction(named: Text("Close details"), onToggleDetails)
             } else {
                 Button(action: onToggleDetails) {
                     EventFrontCard(event: event, isJoined: isJoined)
                 }
                 .buttonStyle(.plain)
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
         .background(event.palette.cardGradient, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
@@ -998,6 +838,7 @@ private struct EventFeedCard: View {
         }
         .shadow(color: event.palette.primary.opacity(0.16), radius: 20, y: 9)
         .shadow(color: Color.black.opacity(0.045), radius: 11, y: 5)
+        .animation(.spring(response: 0.34, dampingFraction: 0.9), value: isShowingDetails)
     }
 }
 

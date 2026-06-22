@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>L!V!N</title>
+    <meta
+      name="description"
+      content="L!V!N is a live-map social app for finding events, posting location-locked snaps, and building your real-world map."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <img class="app-icon" src="./assets/livin-icon.png" alt="L!V!N app icon" />
+          <p class="eyebrow">Events. Live snaps. Real places.</p>
+          <h1>L!V!N</h1>
+          <p class="intro">
+            A social map built around going outside: discover nearby events, post snaps from where you actually are,
+            and save the places you want to remember.
+          </p>
+          <div class="actions">
+            <a href="mailto:hello@livin.app?subject=L!V!N%20TestFlight" class="primary-action">Join TestFlight</a>
+            <a href="#stack" class="secondary-action">See the build</a>
+          </div>
+        </div>
+
+        <div class="phone" aria-label="L!V!N app preview">
+          <div class="phone-top"></div>
+          <div class="app-header">
+            <span></span>
+            <strong>L!V!N</strong>
+            <span></span>
+          </div>
+          <article class="event-card active">
+            <small>@jettsonaway</small>
+            <h2>Sunset Volleyball</h2>
+            <p>Santa Monica Beach · 6:00 PM · Free</p>
+          </article>
+          <article class="event-card">
+            <small>@miraruns</small>
+            <h2>Griffith Night Hike</h2>
+            <p>Griffith Park · 7:15 PM · Free</p>
+          </article>
+          <article class="event-card ghost">
+            <small>@noahoutside</small>
+            <h2>Echo Park Picnic</h2>
+            <p>Saturday · 22 going</p>
+          </article>
+          <nav class="mini-tabs">
+            <span>Events</span>
+            <span>Create</span>
+            <span>Map</span>
+          </nav>
+        </div>
+      </section>
+
+      <section id="stack" class="info-grid">
+        <article>
+          <h2>Map First</h2>
+          <p>Live snaps become floating posts on the map. Guide spots become saved circles for future trips.</p>
+        </article>
+        <article>
+          <h2>Social Core</h2>
+          <p>Profiles, follows, private/public mode, event groups, and realtime chat are the first multiplayer loop.</p>
+        </article>
+        <article>
+          <h2>Built Native</h2>
+          <p>SwiftUI, MapKit first, Supabase backend, APNs notifications, Stripe ticketing later.</p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

@@ -237,7 +237,7 @@ Useful installed/available now:
 - GitHub: repo, issues, PRs, commits, and review workflow.
 - Stripe: installed now; useful once ticketing starts.
 - Figma/Canva: useful later for design systems, decks, and marketing assets.
-- Hostinger plugin is available to install, but it is more useful for website/app builder workflows than this native iOS codebase.
+- Hostinger: installed now, but no callable Hostinger website creation tool is exposed in this Codex thread. Use the repo's `website/` folder and upload it through hPanel for now.
 
 Not currently exposed as exact Codex plugins here:
 

@@ -11,6 +11,8 @@ The app-facing brand is `L!V!N`. The Xcode target, bundle code paths, and Swift 
 - Map tab for location-based snaps and profile/map memory previews.
 - Create flow for camera/photo-backed live snaps.
 - Profile settings for public/private account mode.
+- Supabase Edge Function starter templates for Stripe ticket checkout/webhooks.
+- Static Hostinger-ready landing page in `website/`.
 
 ## Next Build Priorities
 
@@ -20,4 +22,4 @@ The app-facing brand is `L!V!N`. The Xcode target, bundle code paths, and Swift 
 4. California guide map: saved Google Maps-style places, floating place circles, save-to-folder pins.
 5. Ticketing: free events by default, optional paid tickets later with platform fee.
 
-See [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md) for the implementation plan, [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for service setup, and [docs/TECH_STACK_RECOMMENDATION.md](docs/TECH_STACK_RECOMMENDATION.md) for the current stack decision.
+See [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md) for the implementation plan, [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for service setup, [docs/TECH_STACK_RECOMMENDATION.md](docs/TECH_STACK_RECOMMENDATION.md) for the current stack decision, and [website/README.md](website/README.md) for the landing page.
