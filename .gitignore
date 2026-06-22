@@ -1,0 +1,8 @@
+build/
+DerivedData/
+*.xcuserstate
+.env
+.env.*
+*.p8
+supabase/.branches/
+supabase/.temp/
