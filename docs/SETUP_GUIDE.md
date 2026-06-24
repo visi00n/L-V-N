@@ -156,6 +156,29 @@ Supabase should be the first real backend because one service can cover:
 - Storage for snap photos
 - Edge Functions for secure server-side actions
 
+Current project-specific setup is tracked in:
+
+```text
+/Users/laptcv/Desktop/LIVE/docs/SUPABASE_SETUP.md
+```
+
+Run the actual SQL files from the repo, not older pasted chat snippets:
+
+```text
+/Users/laptcv/Desktop/LIVE/supabase/schema.sql
+/Users/laptcv/Desktop/LIVE/supabase/rls_policies.sql
+/Users/laptcv/Desktop/LIVE/supabase/storage_policies.sql
+/Users/laptcv/Desktop/LIVE/supabase/realtime_tables.sql
+```
+
+The active Supabase project URL for Swift is:
+
+```text
+https://wppernaddlrwjgcmikyj.supabase.co
+```
+
+The `/rest/v1/` Data API URL shown in Supabase is not the value used in `SupabaseClient`.
+
 ### Create the Project
 
 1. Go to https://database.new.
