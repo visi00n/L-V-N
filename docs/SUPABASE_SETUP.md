@@ -211,7 +211,7 @@ Use Postgres Changes for the MVP:
 
 Presence can come later for `who is here` and `who is online`.
 
-## First App Connection Check
+## First App Backend Loop
 
 The app now has:
 
@@ -222,19 +222,81 @@ let supabase = SupabaseClient(
 )
 ```
 
+The iOS app currently connects these MVP pieces:
+
+- Supabase email/password sign up and login.
+- Profile row creation in `public.profiles`.
+- Profile onboarding if a signed-in user is missing a profile row.
+- Camera/photo capture from the Create tab.
+- Caption and location name validation.
+- Current GPS coordinate requirement before posting.
+- JPEG upload to the private `snap-media` bucket.
+- Snap row insert into `public.snaps` using `creator_id`.
+- Snap media metadata insert into `public.snap_media`.
+- Signed URL loading for private snap images on the map.
+- Public snap fetch on app launch/map load.
+- Realtime Postgres Changes subscription for new map snaps.
+
 The local compile check passed:
 
 ```bash
 xcodebuild -project LIVE.xcodeproj -scheme LIVE -configuration Debug -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
 ```
 
-Next coding step:
+Before testing on phones, confirm these dashboard settings:
 
-1. Add auth screens.
-2. Create a profile row after signup.
-3. Connect event list reads.
-4. Connect snap upload to `snap-media`.
-5. Subscribe to realtime table changes.
+1. Authentication > Providers > Email is enabled.
+2. For fastest MVP testing, disable email confirmation. If email confirmation stays enabled, sign-up will create the Auth user but the app will ask the tester to confirm email and then log in.
+3. Storage contains `snap-media` as a private bucket.
+4. Storage contains `avatars` as a public bucket.
+5. `supabase/storage_policies.sql` has been run.
+6. Realtime is enabled for `snaps`.
+7. RLS policies from `supabase/rls_policies.sql` have been run.
+
+## Phone Test Steps
+
+Test A: account and profile
+
+1. Install/run the app from Xcode or TestFlight.
+2. Sign up with email, password, username, and display name.
+3. If email confirmation is off, the app should enter L!V!N immediately.
+4. If email confirmation is on, confirm the email, then log in.
+5. Supabase Table Editor > `profiles` should show a row whose `id` matches the Auth user id.
+
+Test B: create a live snap
+
+1. Allow Location permission.
+2. Tap Create.
+3. Take or select a photo.
+4. Enter a caption.
+5. Enter a location name.
+6. Keep `WAS THIS PART OF EVENTT` on No for now unless the selected event comes from a real Supabase UUID.
+7. Tap `Post live snap`.
+8. Supabase Storage > `snap-media` should contain an image under `<user_id>/<uuid>.jpg`.
+9. Supabase Table Editor > `snaps` should show the new row.
+10. Supabase Table Editor > `snap_media` should show the media row.
+
+Test C: persistence
+
+1. Close the app.
+2. Reopen it with the same account.
+3. Go to Map.
+4. The snap should load from Supabase and appear as a photo pin.
+
+Test D: two-user map
+
+1. Sign in as user A on one phone/simulator.
+2. Sign in as user B on another phone/simulator.
+3. User A posts a public snap.
+4. User B should see it appear from realtime; if not, reopen the map/app and verify it appears from normal fetch.
+
+## Current MVP Limits
+
+- Event cards still use local sample data.
+- Local event IDs are string IDs, so `attached_event_id` is sent as `nil` unless a selected event ID is a real UUID.
+- Multi-photo slideshow UI is still a placeholder; the backend upload currently posts the first image only.
+- Direct messages, event group chat, paid tickets, APNs, analytics, moderation, and Google Places are intentionally not part of this backend loop.
+- Signed URLs are currently created client-side for authenticated users. Before public launch, move media URL access behind an Edge Function that checks snap visibility.
 
 ## Minimal Test Data
 

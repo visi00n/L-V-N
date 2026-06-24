@@ -48,6 +48,8 @@ private struct LiveRoute: Identifiable {
 
 struct ContentView: View {
     @StateObject private var locationStore = LocationStore()
+    @StateObject private var authManager = AuthManager()
+    @StateObject private var snapMapViewModel = SnapMapViewModel()
 
     @State private var selectedTab: LiveTab = .events
     @State private var joinedEventIDs = Set(LiveData.signedUpEvents.map(\.id))
@@ -64,6 +66,32 @@ struct ContentView: View {
     )
 
     var body: some View {
+        Group {
+            if authManager.isLoading && !authManager.isSignedIn {
+                LoadingBrandView()
+            } else if !authManager.isSignedIn {
+                AuthView(authManager: authManager)
+            } else if authManager.profile == nil {
+                ProfileOnboardingView(authManager: authManager)
+            } else {
+                mainApp
+            }
+        }
+        .task {
+            authManager.start()
+        }
+        .onChange(of: authManager.currentUserID) { _, userID in
+            if userID == nil {
+                snapMapViewModel.reset()
+            }
+        }
+    }
+
+    private var currentExplorer: Explorer {
+        authManager.profile?.explorer ?? LiveData.me
+    }
+
+    private var mainApp: some View {
         ZStack {
             background
 
@@ -78,7 +106,9 @@ struct ContentView: View {
                     )
                 case .map:
                     SnapMapView(
-                        snaps: LiveData.snaps,
+                        snaps: snapMapViewModel.snaps,
+                        isLoading: snapMapViewModel.isLoading,
+                        statusMessage: snapMapViewModel.statusMessage,
                         cameraPosition: $cameraPosition,
                         userCoordinate: locationStore.currentCoordinate,
                         locationStatus: locationStore.statusText,
@@ -102,11 +132,11 @@ struct ContentView: View {
 
             VStack(spacing: 0) {
                 LiveTopBar(
-                    streakCount: LiveData.me.streak,
+                    streakCount: currentExplorer.streak,
                     onStreaks: { activeSheet = .streaks },
                     onGroups: { activeSheet = .groups },
                     onSearch: { activeSheet = .search },
-                    onProfile: { activeSheet = .profile(LiveData.me) }
+                    onProfile: { activeSheet = .profile(currentExplorer) }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
@@ -123,6 +153,8 @@ struct ContentView: View {
         }
         .task {
             locationStore.requestLocation()
+            await snapMapViewModel.loadSnaps()
+            snapMapViewModel.startRealtime()
         }
         .onReceive(locationStore.$currentCoordinate.compactMap { $0 }) { coordinate in
             guard selectedTab == .map else { return }
@@ -137,8 +169,16 @@ struct ContentView: View {
             switch sheet {
             case .create:
                 CreateSnapView(
+                    authManager: authManager,
+                    snapMapViewModel: snapMapViewModel,
                     locationStore: locationStore,
-                    joinedEvents: LiveData.events.filter { joinedEventIDs.contains($0.id) }
+                    joinedEvents: LiveData.events.filter { joinedEventIDs.contains($0.id) },
+                    onPosted: {
+                        activeSheet = nil
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            selectedTab = .map
+                        }
+                    }
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -152,7 +192,16 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             case .profile(let explorer):
-                ProfileSheetView(explorer: explorer, snaps: LiveData.snaps.filter { $0.creator.id == explorer.id || explorer.id == LiveData.me.id })
+                ProfileSheetView(
+                    explorer: explorer,
+                    snaps: snapMapViewModel.snaps.filter { $0.creator.id == explorer.id },
+                    onLogout: explorer.id == currentExplorer.id ? {
+                        activeSheet = nil
+                        Task {
+                            await authManager.logout()
+                        }
+                    } : nil
+                )
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             case .search:
@@ -165,7 +214,7 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             case .streaks:
-                StreaksSheetView(streakCount: LiveData.me.streak)
+                StreaksSheetView(streakCount: currentExplorer.streak)
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             case .groups:
@@ -258,6 +307,30 @@ struct ContentView: View {
                 label: label
             )
         )
+    }
+}
+
+private struct LoadingBrandView: View {
+    var body: some View {
+        ZStack {
+            BrandBackdrop()
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Text("L!V!N")
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.liveSky, Color.liveLavender, Color.liveCoral],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
+                ProgressView()
+                    .tint(Color.liveInk)
+            }
+        }
     }
 }
 
@@ -1101,6 +1174,8 @@ private struct PixelMiniSymbol: View {
 
 private struct SnapMapView: View {
     let snaps: [LiveSnap]
+    let isLoading: Bool
+    let statusMessage: String?
     @Binding var cameraPosition: MapCameraPosition
     let userCoordinate: CLLocationCoordinate2D?
     let locationStatus: String
@@ -1164,6 +1239,27 @@ private struct SnapMapView: View {
                 .padding(.top, 168)
                 .padding(.trailing, 16)
         }
+        .overlay(alignment: .bottom) {
+            if isLoading || statusMessage != nil {
+                HStack(spacing: 9) {
+                    if isLoading {
+                        ProgressView()
+                            .tint(Color.liveInk)
+                    }
+
+                    Text(statusMessage ?? "Loading live snaps...")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveInk)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Color.liveStroke, lineWidth: 1)
+                }
+                .padding(.bottom, 92)
+            }
+        }
     }
 }
 
@@ -1203,25 +1299,8 @@ private struct SnapPhotoPin: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(snap.palette.gradient)
+            SnapImageFrame(snap: snap, height: 78, iconSize: 42, iconFontSize: 22)
                 .frame(width: 66, height: 78)
-                .overlay(alignment: .center) {
-                    PixelIconTile(size: 42, fill: Color.white.opacity(0.16)) {
-                        Image(systemName: snap.palette.symbolName)
-                            .font(.system(size: 22, weight: .black))
-                            .foregroundStyle(Color.liveInk)
-                    }
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.white, lineWidth: 3)
-                }
-                .overlay {
-                    PixelCornerMarks()
-                        .stroke(Color.white.opacity(0.52), style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
-                        .padding(7)
-                }
                 .shadow(color: snap.palette.primary.opacity(0.3), radius: 16, y: 9)
 
             if snap.imageCount > 1 {
@@ -1253,6 +1332,59 @@ private struct SnapPhotoPin: View {
     }
 }
 
+private struct SnapImageFrame: View {
+    let snap: LiveSnap
+    let height: CGFloat
+    let iconSize: CGFloat
+    let iconFontSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(snap.palette.gradient)
+
+            if let imageURL = snap.imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                            .tint(Color.liveInk)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white, lineWidth: 3)
+        }
+        .overlay {
+            PixelCornerMarks()
+                .stroke(Color.white.opacity(0.52), style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                .padding(7)
+        }
+    }
+
+    private var placeholder: some View {
+        PixelIconTile(size: iconSize, fill: Color.white.opacity(0.16)) {
+            Image(systemName: snap.palette.symbolName)
+                .font(.system(size: iconFontSize, weight: .black))
+                .foregroundStyle(Color.liveInk)
+        }
+    }
+}
+
 private struct SnapDetailView: View {
     let snap: LiveSnap
     let attachedEvent: LiveEvent?
@@ -1263,16 +1395,7 @@ private struct SnapDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
                 ZStack(alignment: .topTrailing) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(snap.palette.gradient)
-                        .frame(height: 290)
-
-                    PixelIconTile(size: 112, fill: Color.white.opacity(0.16)) {
-                        Image(systemName: snap.palette.symbolName)
-                            .font(.system(size: 62, weight: .black))
-                            .foregroundStyle(Color.liveInk)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: 290)
+                    SnapImageFrame(snap: snap, height: 290, iconSize: 112, iconFontSize: 62)
 
                     if snap.imageCount > 1 {
                         Label("\(snap.imageCount)", systemImage: "rectangle.stack.fill")
@@ -1372,16 +1495,22 @@ private struct SnapDetailView: View {
 }
 
 private struct CreateSnapView: View {
+    @ObservedObject var authManager: AuthManager
+    @ObservedObject var snapMapViewModel: SnapMapViewModel
     @ObservedObject var locationStore: LocationStore
     let joinedEvents: [LiveEvent]
+    let onPosted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var caption = ""
+    @State private var locationName = ""
     @State private var photoCount = 1
     @State private var isPartOfEvent = false
     @State private var selectedEventID: String?
     @State private var capturedImage: UIImage?
     @State private var isCameraPresented = false
+    @State private var isPosting = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -1482,6 +1611,22 @@ private struct CreateSnapView: View {
                     LocationLockRow(locationStore: locationStore)
 
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("Location name")
+                            .font(.system(size: 17, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+
+                        TextField("Griffith Park, Venice Beach, Campus quad", text: $locationName)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+                            .padding(13)
+                            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.liveLavender.opacity(0.24), lineWidth: 1)
+                            }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Snap caption")
                             .font(.system(size: 17, weight: .black, design: .rounded))
                             .foregroundStyle(Color.liveInk)
@@ -1540,16 +1685,35 @@ private struct CreateSnapView: View {
                         }
                     }
 
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.liveAlertRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 8))
+                    }
+
                     Button {
-                        dismiss()
+                        Task {
+                            await postSnap()
+                        }
                     } label: {
-                        Text("Post live snap")
+                        HStack(spacing: 9) {
+                            if isPosting {
+                                ProgressView()
+                                    .tint(Color.liveOnInk)
+                            }
+
+                            Text(isPosting ? "Posting..." : "Post live snap")
+                        }
                             .font(.system(size: 16, weight: .black, design: .rounded))
                             .foregroundStyle(Color.liveOnInk)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
                             .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 8))
                     }
+                    .disabled(isPosting)
                     .buttonStyle(.plain)
                 }
                 .padding(18)
@@ -1573,6 +1737,57 @@ private struct CreateSnapView: View {
         .sheet(isPresented: $isCameraPresented) {
             CameraCaptureView(image: $capturedImage)
                 .ignoresSafeArea()
+        }
+    }
+
+    private func postSnap() async {
+        errorMessage = nil
+        locationStore.requestLocation()
+
+        guard authManager.isSignedIn else {
+            errorMessage = "Log in before posting a live snap."
+            return
+        }
+
+        guard let capturedImage else {
+            errorMessage = "Take a picture before posting."
+            return
+        }
+
+        guard let coordinate = locationStore.currentCoordinate else {
+            errorMessage = "Current location is required. Allow location access and try again."
+            return
+        }
+
+        let cleanCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCaption.isEmpty else {
+            errorMessage = "Missing caption."
+            return
+        }
+
+        let cleanLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanLocationName.isEmpty else {
+            errorMessage = "Missing location name."
+            return
+        }
+
+        isPosting = true
+        defer { isPosting = false }
+
+        do {
+            let draft = SnapDraft(
+                image: capturedImage,
+                caption: cleanCaption,
+                locationName: cleanLocationName,
+                coordinate: coordinate,
+                attachedEventID: isPartOfEvent ? selectedEventID : nil
+            )
+
+            _ = try await snapMapViewModel.postSnap(draft: draft, currentProfile: authManager.profile)
+            onPosted()
+            dismiss()
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 }
@@ -1834,6 +2049,7 @@ private struct SearchSheetView: View {
 private struct ProfileSheetView: View {
     let explorer: Explorer
     let snaps: [LiveSnap]
+    let onLogout: (() -> Void)?
 
     @State private var accountPrivacy: AccountPrivacy = .privateAccount
 
@@ -1864,8 +2080,20 @@ private struct ProfileSheetView: View {
                     MetricBox(title: "Snaps", value: "\(snaps.count)")
                 }
 
-                if explorer.id == LiveData.me.id {
+                if onLogout != nil {
                     AccountSettingsCard(selection: $accountPrivacy)
+                }
+
+                if let onLogout {
+                    Button(action: onLogout) {
+                        Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveOnInk)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 if !snaps.isEmpty {
@@ -2276,7 +2504,7 @@ private extension LiveEvent {
     }
 }
 
-private extension Color {
+extension Color {
     static let liveInk = dynamicColor(
         light: UIColor(red: 0.05, green: 0.07, blue: 0.17, alpha: 1),
         dark: UIColor(red: 0.94, green: 0.96, blue: 1.0, alpha: 1)

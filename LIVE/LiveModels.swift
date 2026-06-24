@@ -100,6 +100,36 @@ struct LiveSnap: Identifiable, Equatable {
     let imageCount: Int
     let palette: SnapPalette
     let attachedEventID: String?
+    let firstMediaPath: String?
+    let imageURL: URL?
+
+    init(
+        id: String,
+        title: String,
+        caption: String,
+        creator: Explorer,
+        locationName: String,
+        timeLabel: String,
+        coordinate: CLLocationCoordinate2D,
+        imageCount: Int,
+        palette: SnapPalette,
+        attachedEventID: String?,
+        firstMediaPath: String? = nil,
+        imageURL: URL? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.caption = caption
+        self.creator = creator
+        self.locationName = locationName
+        self.timeLabel = timeLabel
+        self.coordinate = coordinate
+        self.imageCount = imageCount
+        self.palette = palette
+        self.attachedEventID = attachedEventID
+        self.firstMediaPath = firstMediaPath
+        self.imageURL = imageURL
+    }
 
     static func == (lhs: LiveSnap, rhs: LiveSnap) -> Bool {
         lhs.id == rhs.id
