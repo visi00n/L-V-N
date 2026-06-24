@@ -118,6 +118,15 @@ final class AuthManager: ObservableObject {
         }
     }
 
+    func refreshProfile() async {
+        guard let userID = currentUserID else { return }
+        do {
+            profile = try await fetchProfile(userID: userID)
+        } catch {
+            errorMessage = Self.message(for: error)
+        }
+    }
+
     private func handleAuthState(session newSession: Session?) async {
         session = newSession
 

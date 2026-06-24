@@ -154,11 +154,28 @@ using (
   )
 );
 
+create policy "authenticated users create dm conversations"
+on public.direct_conversations for insert
+to authenticated
+with check (true);
+
 create policy "dm members readable by members"
 on public.direct_conversation_members for select
 to authenticated
 using (
   exists (
+    select 1 from public.direct_conversation_members mine
+    where mine.conversation_id = direct_conversation_members.conversation_id
+    and mine.user_id = (select auth.uid())
+  )
+);
+
+create policy "users create dm memberships"
+on public.direct_conversation_members for insert
+to authenticated
+with check (
+  user_id = (select auth.uid())
+  or exists (
     select 1 from public.direct_conversation_members mine
     where mine.conversation_id = direct_conversation_members.conversation_id
     and mine.user_id = (select auth.uid())

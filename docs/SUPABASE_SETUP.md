@@ -236,6 +236,12 @@ The iOS app currently connects these MVP pieces:
 - Signed URL loading for private snap images on the map.
 - Public snap fetch on app launch/map load.
 - Realtime Postgres Changes subscription for new map snaps.
+- Supabase event fetch/create/join with local sample events as fallback.
+- Nearby event radius filtering in the Events tab and public map.
+- Public map mode for snaps/events and personal map mode for only your snaps.
+- Event group chat fetch/send/realtime for joined Supabase events.
+- Follow/unfollow and follower/following counts from `public.follows`.
+- Basic direct messages through `direct_conversations`, `direct_conversation_members`, and `direct_messages`.
 
 The local compile check passed:
 
@@ -250,8 +256,9 @@ Before testing on phones, confirm these dashboard settings:
 3. Storage contains `snap-media` as a private bucket.
 4. Storage contains `avatars` as a public bucket.
 5. `supabase/storage_policies.sql` has been run.
-6. Realtime is enabled for `snaps`.
+6. Realtime is enabled for `snaps`, `events`, `event_members`, `event_messages`, `follows`, and `direct_messages`.
 7. RLS policies from `supabase/rls_policies.sql` have been run.
+8. If you ran an older RLS file, rerun the current one so DM conversation creation policies exist.
 
 ## Phone Test Steps
 
@@ -290,12 +297,39 @@ Test D: two-user map
 3. User A posts a public snap.
 4. User B should see it appear from realtime; if not, reopen the map/app and verify it appears from normal fetch.
 
+Test E: event creation and discovery
+
+1. Allow Location permission.
+2. From Events, tap the Event create button.
+3. Create a free event with title, category, date/time, location name, and current location.
+4. Confirm Supabase Table Editor > `events` has the row.
+5. Confirm Supabase Table Editor > `event_members` has the creator as `owner`.
+6. Change radius filters and confirm the event appears/disappears based on distance.
+
+Test F: event joining and chat
+
+1. Sign in as another user.
+2. Open the event detail and tap Join.
+3. Confirm joined count updates after reload/realtime.
+4. Open Chat and send a message.
+5. Confirm Supabase Table Editor > `event_messages` has the row.
+6. With another joined user open, confirm chat updates by realtime or after reopening chat.
+
+Test G: profile, follow, and DM
+
+1. Open another user's profile from a snap, event host, or Messages.
+2. Tap Follow and confirm `follows` gets a row.
+3. Tap Message and send a text DM.
+4. Confirm `direct_conversations`, `direct_conversation_members`, and `direct_messages` get rows.
+5. Sign in as the other user and confirm the DM loads.
+
 ## Current MVP Limits
 
-- Event cards still use local sample data.
+- Event cards use local sample data as fallback, but Supabase-created events now load into the same feed.
 - Local event IDs are string IDs, so `attached_event_id` is sent as `nil` unless a selected event ID is a real UUID.
 - Multi-photo slideshow UI is still a placeholder; the backend upload currently posts the first image only.
-- Direct messages, event group chat, paid tickets, APNs, analytics, moderation, and Google Places are intentionally not part of this backend loop.
+- Paid tickets, APNs, analytics, moderation, Google Places, and advanced verification are intentionally not part of this backend loop.
+- DM creation depends on the current `direct_conversations` and `direct_conversation_members` RLS policies in `supabase/rls_policies.sql`.
 - Signed URLs are currently created client-side for authenticated users. Before public launch, move media URL access behind an Edge Function that checks snap visibility.
 
 ## Minimal Test Data
