@@ -35,6 +35,8 @@ create table if not exists public.events (
   is_paid boolean not null default false,
   price_cents integer,
   capacity integer,
+  cover_image_path text,
+  color_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -43,7 +45,8 @@ create table if not exists public.event_members (
   event_id uuid not null references public.events(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   role text not null default 'member',
-  joined_at timestamptz not null default now(),
+  status text not null default 'active',
+  joined_at timestamptz default now(),
   primary key (event_id, user_id)
 );
 
@@ -51,15 +54,19 @@ create table if not exists public.event_messages (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
   sender_id uuid not null references public.profiles(id) on delete cascade,
+  message_type text not null default 'text',
   body text not null,
-  created_at timestamptz not null default now()
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.snaps (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
   attached_event_id uuid references public.events(id) on delete set null,
   caption text not null,
+  location jsonb,
   location_name text not null,
   latitude double precision not null,
   longitude double precision not null,
@@ -80,13 +87,15 @@ create table if not exists public.snap_media (
 
 create table if not exists public.direct_conversations (
   id uuid primary key default gen_random_uuid(),
-  created_at timestamptz not null default now()
+  created_by uuid references auth.users(id) on delete set null default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.direct_conversation_members (
   conversation_id uuid not null references public.direct_conversations(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  joined_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
   primary key (conversation_id, user_id)
 );
 
@@ -95,7 +104,8 @@ create table if not exists public.direct_messages (
   conversation_id uuid not null references public.direct_conversations(id) on delete cascade,
   sender_id uuid not null references public.profiles(id) on delete cascade,
   body text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.reports (
@@ -126,10 +136,11 @@ create index if not exists events_starts_at_idx on public.events(starts_at);
 create index if not exists event_members_user_id_idx on public.event_members(user_id);
 create index if not exists event_messages_event_id_created_at_idx on public.event_messages(event_id, created_at);
 create index if not exists event_messages_sender_id_idx on public.event_messages(sender_id);
-create index if not exists snaps_creator_id_created_at_idx on public.snaps(creator_id, created_at);
+create index if not exists snaps_user_id_created_at_idx on public.snaps(user_id, created_at);
 create index if not exists snaps_attached_event_id_idx on public.snaps(attached_event_id);
 create index if not exists snaps_is_public_idx on public.snaps(is_public);
 create index if not exists snap_media_snap_id_sort_order_idx on public.snap_media(snap_id, sort_order);
+create index if not exists direct_conversations_created_by_idx on public.direct_conversations(created_by);
 create index if not exists direct_conversation_members_user_id_idx on public.direct_conversation_members(user_id);
 create index if not exists direct_messages_conversation_id_created_at_idx on public.direct_messages(conversation_id, created_at);
 create index if not exists direct_messages_sender_id_idx on public.direct_messages(sender_id);

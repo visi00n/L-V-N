@@ -288,7 +288,7 @@ create table public.event_members (
 
 create table public.snaps (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
   attached_event_id uuid references public.events(id) on delete set null,
   caption text not null default '',
   location_name text not null,
@@ -455,7 +455,7 @@ to authenticated
 using (
   exists (
     select 1 from public.profiles p
-    where p.id = snaps.creator_id
+    where p.id = snaps.user_id
     and (
       p.is_private = false
       or p.id = auth.uid()
@@ -471,7 +471,7 @@ using (
 create policy "users create own snaps"
 on public.snaps for insert
 to authenticated
-with check (creator_id = auth.uid());
+with check (user_id = auth.uid());
 
 create policy "snap media readable with snap"
 on public.snap_media for select

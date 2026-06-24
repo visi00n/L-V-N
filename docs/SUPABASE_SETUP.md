@@ -231,7 +231,7 @@ The iOS app currently connects these MVP pieces:
 - Caption and location name validation.
 - Current GPS coordinate requirement before posting.
 - JPEG upload to the private `snap-media` bucket.
-- Snap row insert into `public.snaps` using `creator_id`.
+- Snap row insert into `public.snaps` using `user_id`.
 - Snap media metadata insert into `public.snap_media`.
 - Signed URL loading for private snap images on the map.
 - Public snap fetch on app launch/map load.
@@ -241,7 +241,7 @@ The iOS app currently connects these MVP pieces:
 - Public map mode for snaps/events and personal map mode for only your snaps.
 - Event group chat fetch/send/realtime for joined Supabase events.
 - Follow/unfollow and follower/following counts from `public.follows`.
-- Basic direct messages through `direct_conversations`, `direct_conversation_members`, and `direct_messages`.
+- Basic direct messages through the `create_direct_conversation` RPC, `direct_conversations`, `direct_conversation_members`, and `direct_messages`.
 
 The local compile check passed:
 
@@ -256,9 +256,10 @@ Before testing on phones, confirm these dashboard settings:
 3. Storage contains `snap-media` as a private bucket.
 4. Storage contains `avatars` as a public bucket.
 5. `supabase/storage_policies.sql` has been run.
-6. Realtime is enabled for `snaps`, `events`, `event_members`, `event_messages`, `follows`, and `direct_messages`.
-7. RLS policies from `supabase/rls_policies.sql` have been run.
-8. If you ran an older RLS file, rerun the current one so DM conversation creation policies exist.
+6. RLS policies from `supabase/rls_policies.sql` have been run.
+7. RPC functions from `supabase/rpc_functions.sql` have been run.
+8. Realtime is enabled for `snaps`, `events`, `event_members`, `event_messages`, `follows`, and `direct_messages`.
+9. If you ran an older RLS file, rerun the current one so DM conversation creation policies exist.
 
 ## Phone Test Steps
 
@@ -329,7 +330,7 @@ Test G: profile, follow, and DM
 - Local event IDs are string IDs, so `attached_event_id` is sent as `nil` unless a selected event ID is a real UUID.
 - Multi-photo slideshow UI is still a placeholder; the backend upload currently posts the first image only.
 - Paid tickets, APNs, analytics, moderation, Google Places, and advanced verification are intentionally not part of this backend loop.
-- DM creation depends on the current `direct_conversations` and `direct_conversation_members` RLS policies in `supabase/rls_policies.sql`.
+- DM creation depends on `supabase/rpc_functions.sql` plus the current `direct_conversations` and `direct_conversation_members` RLS policies in `supabase/rls_policies.sql`.
 - Signed URLs are currently created client-side for authenticated users. Before public launch, move media URL access behind an Edge Function that checks snap visibility.
 
 ## Minimal Test Data

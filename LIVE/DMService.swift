@@ -36,27 +36,15 @@ final class DMService {
             return existing
         }
 
-        let conversationResponse: PostgrestResponse<[DirectConversation]> = try await supabase
-            .from("direct_conversations")
-            .insert(DirectConversationInsert(), returning: .representation)
-            .select()
+        let conversationID: UUID = try await supabase
+            .rpc(
+                "create_direct_conversation",
+                params: CreateDirectConversationParams(targetUserID: targetUserID)
+            )
             .execute()
+            .value
 
-        guard let conversation = conversationResponse.value.first else {
-            throw DMServiceError.message("Conversation was not returned by Supabase.")
-        }
-
-        try await supabase
-            .from("direct_conversation_members")
-            .insert(DirectConversationMemberInsert(conversationID: conversation.id, userID: currentUserID))
-            .execute()
-
-        try await supabase
-            .from("direct_conversation_members")
-            .insert(DirectConversationMemberInsert(conversationID: conversation.id, userID: targetUserID))
-            .execute()
-
-        return conversation.id
+        return conversationID
     }
 
     func fetchMessages(conversationID: UUID, currentUserID: UUID?, targetProfile: Profile) async throws -> [LiveChatMessage] {
@@ -234,6 +222,14 @@ private enum DMServiceError: LocalizedError {
         case .message(let message):
             message
         }
+    }
+}
+
+private struct CreateDirectConversationParams: Encodable {
+    let targetUserID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetUserID = "target_user_id"
     }
 }
 

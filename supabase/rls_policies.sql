@@ -97,11 +97,11 @@ on public.snaps for select
 to authenticated
 using (
   is_public = true
-  or creator_id = (select auth.uid())
+  or user_id = (select auth.uid())
   or exists (
     select 1 from public.follows f
     where f.follower_id = (select auth.uid())
-    and f.following_id = snaps.creator_id
+    and f.following_id = snaps.user_id
     and f.status = 'approved'
   )
 );
@@ -109,18 +109,18 @@ using (
 create policy "users create own snaps"
 on public.snaps for insert
 to authenticated
-with check (creator_id = (select auth.uid()));
+with check (user_id = (select auth.uid()));
 
 create policy "users update own snaps"
 on public.snaps for update
 to authenticated
-using (creator_id = (select auth.uid()))
-with check (creator_id = (select auth.uid()));
+using (user_id = (select auth.uid()))
+with check (user_id = (select auth.uid()));
 
 create policy "users delete own snaps"
 on public.snaps for delete
 to authenticated
-using (creator_id = (select auth.uid()));
+using (user_id = (select auth.uid()));
 
 create policy "snap media readable"
 on public.snap_media for select
@@ -139,7 +139,7 @@ with check (
   exists (
     select 1 from public.snaps s
     where s.id = snap_media.snap_id
-    and s.creator_id = (select auth.uid())
+    and s.user_id = (select auth.uid())
   )
 );
 
@@ -154,10 +154,10 @@ using (
   )
 );
 
-create policy "authenticated users create dm conversations"
+create policy "users create own direct_conversations"
 on public.direct_conversations for insert
 to authenticated
-with check (true);
+with check (created_by = (select auth.uid()));
 
 create policy "dm members readable by members"
 on public.direct_conversation_members for select
@@ -170,15 +170,33 @@ using (
   )
 );
 
-create policy "users create dm memberships"
+create policy "users can insert direct_conversation_members safely"
 on public.direct_conversation_members for insert
 to authenticated
 with check (
-  user_id = (select auth.uid())
-  or exists (
-    select 1 from public.direct_conversation_members mine
-    where mine.conversation_id = direct_conversation_members.conversation_id
-    and mine.user_id = (select auth.uid())
+  (
+    user_id = (select auth.uid())
+    and not exists (
+      select 1 from public.direct_conversation_members existing
+      where existing.conversation_id = direct_conversation_members.conversation_id
+    )
+  )
+  or (
+    user_id <> (select auth.uid())
+    and exists (
+      select 1 from public.profiles target_profile
+      where target_profile.id = direct_conversation_members.user_id
+    )
+    and exists (
+      select 1 from public.direct_conversation_members mine
+      where mine.conversation_id = direct_conversation_members.conversation_id
+      and mine.user_id = (select auth.uid())
+    )
+    and (
+      select count(*)
+      from public.direct_conversation_members existing
+      where existing.conversation_id = direct_conversation_members.conversation_id
+    ) = 1
   )
 );
 

@@ -82,7 +82,7 @@ struct Snap: Codable, Identifiable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case creatorID = "creator_id"
+        case creatorID = "user_id"
         case attachedEventID = "attached_event_id"
         case caption
         case locationName = "location_name"
@@ -108,7 +108,7 @@ struct SnapInsert: Encodable {
     let isPublic: Bool
 
     enum CodingKeys: String, CodingKey {
-        case creatorID = "creator_id"
+        case creatorID = "user_id"
         case attachedEventID = "attached_event_id"
         case caption
         case locationName = "location_name"
@@ -218,7 +218,7 @@ struct EventMember: Codable, Equatable {
     let eventID: UUID
     let userID: UUID
     let role: String
-    let joinedAt: Date
+    let joinedAt: Date?
 
     var id: String {
         "\(eventID.uuidString)-\(userID.uuidString)"
@@ -317,7 +317,7 @@ struct DirectConversationInsert: Encodable {}
 struct DirectConversationMember: Codable, Equatable {
     let conversationID: UUID
     let userID: UUID
-    let joinedAt: Date
+    let createdAt: Date
 
     var id: String {
         "\(conversationID.uuidString)-\(userID.uuidString)"
@@ -326,7 +326,7 @@ struct DirectConversationMember: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case conversationID = "conversation_id"
         case userID = "user_id"
-        case joinedAt = "joined_at"
+        case createdAt = "created_at"
     }
 }
 
