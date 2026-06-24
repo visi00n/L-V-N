@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		61F7E81DBCA4FF7AE3042448 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 7DC8469844E12B22AA2F2AF3 /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		B4B6566F2FE34525009082D0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -32,16 +36,22 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B4B656612FE34523009082D0 /* LIVE */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = LIVE;
 			sourceTree = "<group>";
 		};
 		B4B656712FE34525009082D0 /* LIVETests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = LIVETests;
 			sourceTree = "<group>";
 		};
 		B4B6567B2FE34525009082D0 /* LIVEUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = LIVEUITests;
 			sourceTree = "<group>";
 		};
@@ -52,6 +62,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				61F7E81DBCA4FF7AE3042448 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +123,7 @@
 			);
 			name = LIVE;
 			packageProductDependencies = (
+				7DC8469844E12B22AA2F2AF3 /* Supabase */,
 			);
 			productName = LIVE;
 			productReference = B4B6565F2FE34523009082D0 /* LIVE.app */;
@@ -134,8 +146,6 @@
 				B4B656712FE34525009082D0 /* LIVETests */,
 			);
 			name = LIVETests;
-			packageProductDependencies = (
-			);
 			productName = LIVETests;
 			productReference = B4B6566E2FE34525009082D0 /* LIVETests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -157,8 +167,6 @@
 				B4B6567B2FE34525009082D0 /* LIVEUITests */,
 			);
 			name = LIVEUITests;
-			packageProductDependencies = (
-			);
 			productName = LIVEUITests;
 			productReference = B4B656782FE34525009082D0 /* LIVEUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -195,6 +203,9 @@
 			);
 			mainGroup = B4B656562FE34523009082D0;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				342BBF79C9148A048E74FD55 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B4B656602FE34523009082D0 /* Products */;
 			projectDirPath = "";
@@ -401,6 +412,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "L!V!N";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "L!V!N uses your camera to create live snaps at events and places you visit.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "L!V!N uses your location to pin live snaps exactly where you took them.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L!V!N lets you choose a photo when the camera is not available.";
@@ -437,6 +450,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "L!V!N";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "L!V!N uses your camera to create live snaps at events and places you visit.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "L!V!N uses your location to pin live snaps exactly where you took them.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "L!V!N lets you choose a photo when the camera is not available.";
@@ -586,6 +601,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		342BBF79C9148A048E74FD55 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.48.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7DC8469844E12B22AA2F2AF3 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 342BBF79C9148A048E74FD55 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = B4B656572FE34523009082D0 /* Project object */;
 }

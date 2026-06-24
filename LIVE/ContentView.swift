@@ -12,8 +12,12 @@ import UIKit
 
 private enum LiveSheet: Identifiable {
     case create
+    case createEvent
     case snap(LiveSnap)
+    case event(LiveEvent)
+    case eventChat(LiveEvent)
     case profile(Explorer)
+    case directMessage(Explorer)
     case search
     case streaks
     case groups
@@ -23,10 +27,18 @@ private enum LiveSheet: Identifiable {
         switch self {
         case .create:
             "create"
+        case .createEvent:
+            "create-event"
         case .snap(let snap):
             "snap-\(snap.id)"
+        case .event(let event):
+            "event-\(event.id)"
+        case .eventChat(let event):
+            "event-chat-\(event.id)"
         case .profile(let explorer):
             "profile-\(explorer.id)"
+        case .directMessage(let explorer):
+            "direct-message-\(explorer.id)"
         case .search:
             "search"
         case .streaks:
@@ -48,9 +60,13 @@ private struct LiveRoute: Identifiable {
 
 struct ContentView: View {
     @StateObject private var locationStore = LocationStore()
+    @StateObject private var authManager = AuthManager()
+    @StateObject private var snapMapViewModel = SnapMapViewModel()
+    @StateObject private var eventViewModel = EventViewModel()
 
     @State private var selectedTab: LiveTab = .events
-    @State private var joinedEventIDs = Set(LiveData.signedUpEvents.map(\.id))
+    @State private var eventRadius: EventRadius = .twentyFive
+    @State private var mapMode: MapMode = .public
     @State private var activeSheet: LiveSheet?
     @State private var currentMapRegion = MKCoordinateRegion(
         center: LiveData.mapFallback,
@@ -64,6 +80,33 @@ struct ContentView: View {
     )
 
     var body: some View {
+        Group {
+            if authManager.isLoading && !authManager.isSignedIn {
+                LoadingBrandView()
+            } else if !authManager.isSignedIn {
+                AuthView(authManager: authManager)
+            } else if authManager.profile == nil {
+                ProfileOnboardingView(authManager: authManager)
+            } else {
+                mainApp
+            }
+        }
+        .task {
+            authManager.start()
+        }
+        .onChange(of: authManager.currentUserID) { _, userID in
+            if userID == nil {
+                snapMapViewModel.reset()
+                eventViewModel.stopRealtime()
+            }
+        }
+    }
+
+    private var currentExplorer: Explorer {
+        authManager.profile?.explorer ?? LiveData.me
+    }
+
+    private var mainApp: some View {
         ZStack {
             background
 
@@ -71,14 +114,25 @@ struct ContentView: View {
                 switch selectedTab {
                 case .events:
                     HomeEventsView(
-                        events: LiveData.events,
-                        joinedEventIDs: joinedEventIDs,
+                        events: eventViewModel.events,
+                        joinedEventIDs: eventViewModel.joinedEventIDs,
+                        radius: $eventRadius,
+                        userCoordinate: locationStore.currentCoordinate,
+                        statusMessage: eventViewModel.statusMessage,
+                        onCreateEvent: { activeSheet = .createEvent },
+                        onOpenDetail: { activeSheet = .event($0) },
                         onRoute: route,
                         onToggleJoin: toggleJoin
                     )
                 case .map:
                     SnapMapView(
-                        snaps: LiveData.snaps,
+                        snaps: mapMode == .personal ? snapMapViewModel.snaps.filter { $0.creator.id == currentExplorer.id } : snapMapViewModel.snaps,
+                        events: eventViewModel.events,
+                        joinedEventIDs: eventViewModel.joinedEventIDs,
+                        mapMode: $mapMode,
+                        radius: $eventRadius,
+                        isLoading: snapMapViewModel.isLoading,
+                        statusMessage: snapMapViewModel.statusMessage,
                         cameraPosition: $cameraPosition,
                         userCoordinate: locationStore.currentCoordinate,
                         locationStatus: locationStore.statusText,
@@ -86,7 +140,8 @@ struct ContentView: View {
                         onZoomIn: { zoomMap(by: 0.55) },
                         onZoomOut: { zoomMap(by: 1.55) },
                         onMapRegionChange: { currentMapRegion = $0 },
-                        onSelectSnap: { activeSheet = .snap($0) }
+                        onSelectSnap: { activeSheet = .snap($0) },
+                        onSelectEvent: { activeSheet = .event($0) }
                     )
                     .ignoresSafeArea()
                 case .create:
@@ -102,11 +157,11 @@ struct ContentView: View {
 
             VStack(spacing: 0) {
                 LiveTopBar(
-                    streakCount: LiveData.me.streak,
+                    streakCount: currentExplorer.streak,
                     onStreaks: { activeSheet = .streaks },
                     onGroups: { activeSheet = .groups },
                     onSearch: { activeSheet = .search },
-                    onProfile: { activeSheet = .profile(LiveData.me) }
+                    onProfile: { activeSheet = .profile(currentExplorer) }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
@@ -123,6 +178,10 @@ struct ContentView: View {
         }
         .task {
             locationStore.requestLocation()
+            await snapMapViewModel.loadSnaps()
+            snapMapViewModel.startRealtime()
+            await eventViewModel.loadEvents(currentUserID: authManager.currentUserID)
+            eventViewModel.startRealtime(currentUserID: authManager.currentUserID)
         }
         .onReceive(locationStore.$currentCoordinate.compactMap { $0 }) { coordinate in
             guard selectedTab == .map else { return }
@@ -137,40 +196,109 @@ struct ContentView: View {
             switch sheet {
             case .create:
                 CreateSnapView(
+                    authManager: authManager,
+                    snapMapViewModel: snapMapViewModel,
                     locationStore: locationStore,
-                    joinedEvents: LiveData.events.filter { joinedEventIDs.contains($0.id) }
+                    joinedEvents: eventViewModel.joinedEvents,
+                    onPosted: {
+                        activeSheet = nil
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            selectedTab = .map
+                        }
+                    }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            case .createEvent:
+                EventCreateView(
+                    currentProfile: authManager.profile,
+                    locationStore: locationStore,
+                    eventViewModel: eventViewModel,
+                    onCreated: { event in
+                        activeSheet = .event(event)
+                    }
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             case .snap(let snap):
                 SnapDetailView(
                     snap: snap,
-                    attachedEvent: LiveData.events.first { $0.id == snap.attachedEventID },
+                    attachedEvent: eventViewModel.events.first { $0.id == snap.attachedEventID },
+                    isOwner: snap.creator.id == currentExplorer.id,
                     onRoute: route,
-                    onProfile: { activeSheet = .profile(snap.creator) }
+                    onProfile: { activeSheet = .profile(snap.creator) },
+                    onReport: {},
+                    onDelete: {}
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+            case .event(let event):
+                EventDetailView(
+                    event: event,
+                    isJoined: eventViewModel.joinedEventIDs.contains(event.id),
+                    isHost: event.host.id == currentExplorer.id || event.hostID == currentExplorer.id,
+                    distanceMiles: event.distanceMiles(from: locationStore.currentCoordinate),
+                    onJoin: { toggleJoin(event) },
+                    onChat: { activeSheet = .eventChat(event) },
+                    onRoute: { route(event) },
+                    onHost: { activeSheet = .profile(event.host) }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            case .eventChat(let event):
+                EventChatView(
+                    event: event,
+                    currentUserID: authManager.currentUserID,
+                    isJoined: eventViewModel.joinedEventIDs.contains(event.id)
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             case .profile(let explorer):
-                ProfileSheetView(explorer: explorer, snaps: LiveData.snaps.filter { $0.creator.id == explorer.id || explorer.id == LiveData.me.id })
+                ProfileSheetView(
+                    explorer: explorer,
+                    currentExplorer: currentExplorer,
+                    currentProfile: authManager.profile,
+                    snaps: snapMapViewModel.snaps.filter { $0.creator.id == explorer.id },
+                    events: eventViewModel.events,
+                    joinedEventIDs: eventViewModel.joinedEventIDs,
+                    onMessage: { activeSheet = .directMessage(explorer) },
+                    onRefreshProfile: { await authManager.refreshProfile() },
+                    onLogout: explorer.id == currentExplorer.id ? {
+                        activeSheet = nil
+                        Task {
+                            await authManager.logout()
+                        }
+                    } : nil
+                )
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            case .directMessage(let explorer):
+                DirectMessageView(
+                    targetExplorer: explorer,
+                    currentUserID: authManager.currentUserID
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             case .search:
                 SearchSheetView(
-                    events: LiveData.events,
-                    joinedEventIDs: joinedEventIDs,
+                    events: eventViewModel.events,
+                    joinedEventIDs: eventViewModel.joinedEventIDs,
+                    onOpenDetail: { activeSheet = .event($0) },
                     onRoute: route,
                     onToggleJoin: toggleJoin
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             case .streaks:
-                StreaksSheetView(streakCount: LiveData.me.streak)
+                StreaksSheetView(streakCount: currentExplorer.streak)
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             case .groups:
-                GroupsSheetView()
-                    .presentationDetents([.medium])
+                InboxView(
+                    currentUserID: authManager.currentUserID,
+                    onOpenDM: { activeSheet = .directMessage($0.explorer) }
+                )
+                    .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             case .route(let route):
                 RoutePreviewView(liveRoute: route)
@@ -182,6 +310,7 @@ struct ContentView: View {
 
     private var background: some View {
         BrandBackdrop()
+            .blur(radius: 8)
             .ignoresSafeArea()
     }
 
@@ -236,12 +365,8 @@ struct ContentView: View {
     }
 
     private func toggleJoin(_ event: LiveEvent) {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-            if joinedEventIDs.contains(event.id) {
-                joinedEventIDs.remove(event.id)
-            } else {
-                joinedEventIDs.insert(event.id)
-            }
+        Task {
+            await eventViewModel.toggleJoin(event, currentUserID: authManager.currentUserID)
         }
     }
 
@@ -258,6 +383,30 @@ struct ContentView: View {
                 label: label
             )
         )
+    }
+}
+
+private struct LoadingBrandView: View {
+    var body: some View {
+        ZStack {
+            BrandBackdrop()
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Text("L!V!N")
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.liveSky, Color.liveLavender, Color.liveCoral],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
+                ProgressView()
+                    .tint(Color.liveInk)
+            }
+        }
     }
 }
 
@@ -739,6 +888,11 @@ private struct PixelCornerMarks: Shape {
 private struct HomeEventsView: View {
     let events: [LiveEvent]
     let joinedEventIDs: Set<String>
+    @Binding var radius: EventRadius
+    let userCoordinate: CLLocationCoordinate2D?
+    let statusMessage: String?
+    let onCreateEvent: () -> Void
+    let onOpenDetail: (LiveEvent) -> Void
     let onRoute: (LiveEvent) -> Void
     let onToggleJoin: (LiveEvent) -> Void
 
@@ -748,7 +902,13 @@ private struct HomeEventsView: View {
 
     private var visibleEvents: [LiveEvent] {
         guard !events.isEmpty else { return [] }
-        return Array(events.prefix(20))
+        let filtered = events.filter { event in
+            guard let miles = radius.miles, let distance = event.distanceMiles(from: userCoordinate) else {
+                return true
+            }
+            return distance <= miles
+        }
+        return Array(filtered.prefix(20))
     }
 
     private var eventEntries: [EventDeckEntry] {
@@ -773,15 +933,25 @@ private struct HomeEventsView: View {
                                     expandedEntryID = expandedEntryID == entry.id ? nil : entry.id
                                 }
                             },
+                            onOpenDetail: { onOpenDetail(entry.event) },
                             onRoute: { onRoute(entry.event) },
                             onToggleJoin: { onToggleJoin(entry.event) }
                         )
                         .id(entry.id)
                         .frame(maxWidth: .infinity)
                     }
+
+                    if eventEntries.isEmpty {
+                        EmptyStateBlock(
+                            symbolName: "scope",
+                            title: "No events nearby",
+                            message: "Try a wider radius or create the first L!V!N event around you."
+                        )
+                        .padding(.top, 22)
+                    }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 126)
+                .padding(.top, 176)
                 .padding(.bottom, 150)
             }
             .onScrollGeometryChange(for: Int.self) { geometry in
@@ -791,11 +961,103 @@ private struct HomeEventsView: View {
                 scrollHaptic.selectionChanged()
                 scrollHaptic.prepare()
             }
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 9) {
+                    RadiusPicker(selection: $radius)
+
+                    Button(action: onCreateEvent) {
+                        Label("Event", systemImage: "plus")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveOnInk)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Create event")
+                }
+
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.liveMuted)
+                        .lineLimit(2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 104)
         }
-        .background(BrandBackdrop())
+        .background(BrandBackdrop().blur(radius: 8))
         .onAppear {
             tapHaptic.prepare()
             scrollHaptic.prepare()
+        }
+    }
+}
+
+private struct RadiusPicker: View {
+    @Binding var selection: EventRadius
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(EventRadius.allCases) { radius in
+                    Button {
+                        withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                            selection = radius
+                        }
+                    } label: {
+                        Text(radius.rawValue)
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
+                            .foregroundStyle(selection == radius ? Color.liveOnInk : Color.liveInk)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 9)
+                            .background(selection == radius ? AnyShapeStyle(Color.liveInk) : AnyShapeStyle(.ultraThinMaterial), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.liveStroke, lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 1)
+        }
+    }
+}
+
+private struct EmptyStateBlock: View {
+    let symbolName: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            PixelIconTile(size: 54, fill: Color.liveSurfaceElevated.opacity(0.82)) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 24, weight: .black))
+                    .foregroundStyle(Color.liveInk)
+            }
+
+            Text(title)
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+
+            Text(message)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(18)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.liveStroke, lineWidth: 1)
         }
     }
 }
@@ -810,6 +1072,7 @@ private struct EventFeedCard: View {
     let isJoined: Bool
     let isShowingDetails: Bool
     let onToggleDetails: () -> Void
+    let onOpenDetail: () -> Void
     let onRoute: () -> Void
     let onToggleJoin: () -> Void
 
@@ -820,6 +1083,7 @@ private struct EventFeedCard: View {
                     event: event,
                     isJoined: isJoined,
                     onFlip: onToggleDetails,
+                    onOpenDetail: onOpenDetail,
                     onRoute: onRoute,
                     onToggleJoin: onToggleJoin
                 )
@@ -831,12 +1095,12 @@ private struct EventFeedCard: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(event.palette.cardGradient, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(event.palette.cardGradient, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(event.palette.primary.opacity(0.28), lineWidth: 1.2)
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(event.palette.primary.opacity(0.36), lineWidth: 1.2)
         }
-        .shadow(color: event.palette.primary.opacity(0.16), radius: 20, y: 9)
+        .shadow(color: event.palette.primary.opacity(0.2), radius: 20, y: 9)
         .shadow(color: Color.black.opacity(0.045), radius: 11, y: 5)
         .animation(.spring(response: 0.34, dampingFraction: 0.9), value: isShowingDetails)
     }
@@ -858,6 +1122,7 @@ private struct EventFrontCard: View {
 
                 Spacer()
 
+                EventBadge(text: event.category, color: event.palette.primary)
                 EventBadge(text: event.feedBadge, color: event.feedBadgeColor)
 
                 if isJoined {
@@ -880,6 +1145,7 @@ private struct EventFrontCard: View {
                 CompactMeta(symbolName: "mappin", text: event.locationName)
                 CompactMeta(symbolName: "clock.fill", text: event.timeLabel)
                 CompactMeta(symbolName: "person.2.fill", text: "\(event.attendeeCount)")
+                CompactMeta(symbolName: "ticket.fill", text: event.capacityText)
                 CompactMeta(symbolName: "dollarsign.circle.fill", text: event.priceLabel)
             }
 
@@ -898,6 +1164,7 @@ private struct EventBackCard: View {
     let event: LiveEvent
     let isJoined: Bool
     let onFlip: () -> Void
+    let onOpenDetail: () -> Void
     let onRoute: () -> Void
     let onToggleJoin: () -> Void
 
@@ -949,6 +1216,16 @@ private struct EventBackCard: View {
             .onTapGesture(perform: onFlip)
 
             HStack(spacing: 10) {
+                Button(action: onOpenDetail) {
+                    Label("Details", systemImage: "info.circle.fill")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(Color.liveSurfaceElevated.opacity(0.62), in: RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+
                 Button(action: onRoute) {
                     Label("Route", systemImage: "arrow.triangle.turn.up.right.circle.fill")
                         .font(.system(size: 14, weight: .black, design: .rounded))
@@ -1101,6 +1378,12 @@ private struct PixelMiniSymbol: View {
 
 private struct SnapMapView: View {
     let snaps: [LiveSnap]
+    let events: [LiveEvent]
+    let joinedEventIDs: Set<String>
+    @Binding var mapMode: MapMode
+    @Binding var radius: EventRadius
+    let isLoading: Bool
+    let statusMessage: String?
     @Binding var cameraPosition: MapCameraPosition
     let userCoordinate: CLLocationCoordinate2D?
     let locationStatus: String
@@ -1109,10 +1392,32 @@ private struct SnapMapView: View {
     let onZoomOut: () -> Void
     let onMapRegionChange: (MKCoordinateRegion) -> Void
     let onSelectSnap: (LiveSnap) -> Void
+    let onSelectEvent: (LiveEvent) -> Void
+
+    private var visibleEvents: [LiveEvent] {
+        guard mapMode == .public else { return [] }
+        return events.filter { event in
+            guard let miles = radius.miles, let userCoordinate, let distance = event.distanceMiles(from: userCoordinate) else {
+                return true
+            }
+            return distance <= miles
+        }
+    }
 
     var body: some View {
         Map(position: $cameraPosition, interactionModes: [.pan, .zoom, .rotate]) {
             UserAnnotation()
+
+            ForEach(visibleEvents) { event in
+                Annotation(event.title, coordinate: event.coordinate, anchor: .bottom) {
+                    Button {
+                        onSelectEvent(event)
+                    } label: {
+                        EventMapPin(event: event, isJoined: joinedEventIDs.contains(event.id))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             ForEach(snaps) { snap in
                 Annotation(snap.title, coordinate: snap.coordinate, anchor: .bottom) {
@@ -1136,6 +1441,24 @@ private struct SnapMapView: View {
         }
         .overlay {
             MapMoodOverlay()
+        }
+        .overlay(alignment: .top) {
+            VStack(spacing: 8) {
+                Picker("Map mode", selection: $mapMode) {
+                    ForEach(MapMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 260)
+
+                if mapMode == .public {
+                    RadiusPicker(selection: $radius)
+                        .frame(maxWidth: 315)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 112)
         }
         .overlay(alignment: .topLeading) {
             Button(action: onRequestLocation) {
@@ -1164,6 +1487,78 @@ private struct SnapMapView: View {
                 .padding(.top, 168)
                 .padding(.trailing, 16)
         }
+        .overlay(alignment: .bottom) {
+            if snaps.isEmpty && !isLoading {
+                HStack(spacing: 8) {
+                    Image(systemName: mapMode == .personal ? "person.crop.square.filled.and.at.rectangle" : "map")
+                        .font(.system(size: 13, weight: .black))
+
+                    Text(mapMode == .personal ? "Your personal map is waiting for your first snap." : "No public snaps nearby yet.")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                }
+                .foregroundStyle(Color.liveInk)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Color.liveStroke, lineWidth: 1)
+                }
+                .padding(.bottom, 92)
+            } else if isLoading || statusMessage != nil {
+                HStack(spacing: 9) {
+                    if isLoading {
+                        ProgressView()
+                            .tint(Color.liveInk)
+                    }
+
+                    Text(statusMessage ?? "Loading live snaps...")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveInk)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Color.liveStroke, lineWidth: 1)
+                }
+                .padding(.bottom, 92)
+            }
+        }
+    }
+}
+
+private struct EventMapPin: View {
+    let event: LiveEvent
+    let isJoined: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                PixelIconTile(size: 46, fill: event.palette.primary.opacity(0.28)) {
+                    Image(systemName: LiveEventCategory(label: event.category).symbolName)
+                        .font(.system(size: 21, weight: .black))
+                        .foregroundStyle(Color.liveInk)
+                }
+                .shadow(color: event.palette.primary.opacity(0.32), radius: 14, y: 8)
+
+                if isJoined {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundStyle(Color.liveOnInk)
+                        .frame(width: 18, height: 18)
+                        .background(Color.liveInk, in: Circle())
+                        .offset(x: 7, y: -7)
+                }
+            }
+
+            Text(event.category)
+                .font(.system(size: 8, weight: .black, design: .monospaced))
+                .foregroundStyle(Color.liveInk)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+        .accessibilityLabel("\(event.title) event")
     }
 }
 
@@ -1203,25 +1598,8 @@ private struct SnapPhotoPin: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(snap.palette.gradient)
+            SnapImageFrame(snap: snap, height: 78, iconSize: 42, iconFontSize: 22)
                 .frame(width: 66, height: 78)
-                .overlay(alignment: .center) {
-                    PixelIconTile(size: 42, fill: Color.white.opacity(0.16)) {
-                        Image(systemName: snap.palette.symbolName)
-                            .font(.system(size: 22, weight: .black))
-                            .foregroundStyle(Color.liveInk)
-                    }
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.white, lineWidth: 3)
-                }
-                .overlay {
-                    PixelCornerMarks()
-                        .stroke(Color.white.opacity(0.52), style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
-                        .padding(7)
-                }
                 .shadow(color: snap.palette.primary.opacity(0.3), radius: 16, y: 9)
 
             if snap.imageCount > 1 {
@@ -1229,7 +1607,11 @@ private struct SnapPhotoPin: View {
                     .font(.system(size: 13, weight: .black))
                     .foregroundStyle(Color.liveInk)
                     .frame(width: 28, height: 28)
-                    .background(Color.white, in: Circle())
+                    .background(Color.liveSurfaceElevated, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color.liveStroke, lineWidth: 1)
+                    }
                     .offset(x: 10, y: -10)
             }
 
@@ -1249,26 +1631,73 @@ private struct SnapPhotoPin: View {
     }
 }
 
+private struct SnapImageFrame: View {
+    let snap: LiveSnap
+    let height: CGFloat
+    let iconSize: CGFloat
+    let iconFontSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(snap.palette.gradient)
+
+            if let imageURL = snap.imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                            .tint(Color.liveInk)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white, lineWidth: 3)
+        }
+        .overlay {
+            PixelCornerMarks()
+                .stroke(Color.white.opacity(0.52), style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                .padding(7)
+        }
+    }
+
+    private var placeholder: some View {
+        PixelIconTile(size: iconSize, fill: Color.white.opacity(0.16)) {
+            Image(systemName: snap.palette.symbolName)
+                .font(.system(size: iconFontSize, weight: .black))
+                .foregroundStyle(Color.liveInk)
+        }
+    }
+}
+
 private struct SnapDetailView: View {
     let snap: LiveSnap
     let attachedEvent: LiveEvent?
+    let isOwner: Bool
     let onRoute: (LiveEvent) -> Void
     let onProfile: () -> Void
+    let onReport: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
                 ZStack(alignment: .topTrailing) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(snap.palette.gradient)
-                        .frame(height: 290)
-
-                    PixelIconTile(size: 112, fill: Color.white.opacity(0.16)) {
-                        Image(systemName: snap.palette.symbolName)
-                            .font(.system(size: 62, weight: .black))
-                            .foregroundStyle(Color.liveInk)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: 290)
+                    SnapImageFrame(snap: snap, height: 290, iconSize: 112, iconFontSize: 62)
 
                     if snap.imageCount > 1 {
                         Label("\(snap.imageCount)", systemImage: "rectangle.stack.fill")
@@ -1276,7 +1705,11 @@ private struct SnapDetailView: View {
                             .foregroundStyle(Color.liveInk)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
-                            .background(Color.white.opacity(0.88), in: Capsule())
+                            .background(Color.liveSurfaceElevated.opacity(0.92), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color.liveStroke, lineWidth: 1)
+                            }
                             .padding(12)
                     }
                 }
@@ -1315,6 +1748,30 @@ private struct SnapDetailView: View {
                     .foregroundStyle(Color.liveMuted)
                     .fixedSize(horizontal: false, vertical: true)
 
+                HStack(spacing: 9) {
+                    Button(action: onReport) {
+                        Label("Report", systemImage: "flag.fill")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    if isOwner {
+                        Button(action: onDelete) {
+                            Label("Delete", systemImage: "trash.fill")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.liveAlertRed)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
                 if let attachedEvent {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Part of event")
@@ -1344,7 +1801,11 @@ private struct SnapDetailView: View {
                                     .font(.system(size: 14, weight: .black))
                                     .foregroundStyle(Color.liveInk)
                                     .frame(width: 38, height: 38)
-                                    .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8))
+                                    .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.liveStroke, lineWidth: 1)
+                                    }
                             }
                             .buttonStyle(.plain)
                         }
@@ -1359,17 +1820,476 @@ private struct SnapDetailView: View {
     }
 }
 
+private struct EventCreateView: View {
+    let currentProfile: Profile?
+    @ObservedObject var locationStore: LocationStore
+    @ObservedObject var eventViewModel: EventViewModel
+    let onCreated: (LiveEvent) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var category: LiveEventCategory = .social
+    @State private var details = ""
+    @State private var startsAt = Date().addingTimeInterval(60 * 60)
+    @State private var hasEndTime = false
+    @State private var endsAt = Date().addingTimeInterval(2 * 60 * 60)
+    @State private var locationName = ""
+    @State private var capacityText = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    EventPoster(event: previewEvent)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 136)
+
+                    formField("Event title") {
+                        TextField("Pickup volleyball, photo walk, study night", text: $title)
+                            .liveFieldStyle()
+                    }
+
+                    formField("Category") {
+                        Picker("Category", selection: $category) {
+                            ForEach(LiveEventCategory.allCases) { category in
+                                Label(category.rawValue, systemImage: category.symbolName).tag(category)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(13)
+                        .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    formField("Details") {
+                        TextEditor(text: $details)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+                            .frame(minHeight: 98)
+                            .padding(10)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    DatePicker("Starts", selection: $startsAt, displayedComponents: [.date, .hourAndMinute])
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveInk)
+                        .padding(12)
+                        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10))
+
+                    Toggle("Add end time", isOn: $hasEndTime)
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveInk)
+                        .padding(12)
+                        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10))
+
+                    if hasEndTime {
+                        DatePicker("Ends", selection: $endsAt, displayedComponents: [.date, .hourAndMinute])
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+                            .padding(12)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    LocationLockRow(locationStore: locationStore)
+
+                    formField("Location name") {
+                        TextField("Santa Monica Beach, campus quad, Griffith Park", text: $locationName)
+                            .liveFieldStyle()
+                    }
+
+                    formField("Capacity") {
+                        TextField("Optional", text: $capacityText)
+                            .keyboardType(.numberPad)
+                            .liveFieldStyle()
+                    }
+
+                    Label("Paid tickets are coming later. MVP events are free.", systemImage: "ticket.fill")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveMuted)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10))
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.liveAlertRed)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    Button {
+                        Task { await createEvent() }
+                    } label: {
+                        HStack(spacing: 9) {
+                            if isSaving {
+                                ProgressView()
+                                    .tint(Color.liveOnInk)
+                            }
+                            Text(isSaving ? "Creating..." : "Create free event")
+                        }
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveOnInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .disabled(isSaving)
+                    .buttonStyle(.plain)
+                }
+                .padding(18)
+            }
+            .background(Color.liveCanvas)
+            .navigationTitle("Create Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                }
+            }
+        }
+        .onAppear {
+            locationStore.requestLocation()
+        }
+    }
+
+    private var previewEvent: LiveEvent {
+        LiveEvent(
+            id: "preview",
+            title: title.isEmpty ? "New L!V!N Event" : title,
+            host: currentProfile?.explorer ?? LiveData.me,
+            category: category.rawValue,
+            locationName: locationName.isEmpty ? "Your location" : locationName,
+            timeLabel: "Soon",
+            attendeeCount: 1,
+            priceLabel: "Free",
+            details: details.isEmpty ? "Add enough detail so people know what they are walking into." : details,
+            coordinate: locationStore.displayCoordinate,
+            palette: category.palette,
+            isSignedUp: true,
+            pulse: .fresh,
+            hostID: currentProfile?.id.uuidString,
+            startsAt: startsAt,
+            endsAt: hasEndTime ? endsAt : nil,
+            capacity: Int(capacityText)
+        )
+    }
+
+    private func formField<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+            content()
+        }
+    }
+
+    private func createEvent() async {
+        errorMessage = nil
+        guard let currentProfile else {
+            errorMessage = "Log in before creating an event."
+            return
+        }
+        guard let coordinate = locationStore.currentCoordinate else {
+            errorMessage = "Current location is required for MVP event creation."
+            locationStore.requestLocation()
+            return
+        }
+
+        isSaving = true
+        defer { isSaving = false }
+
+        do {
+            let draft = EventDraft(
+                title: title,
+                category: category,
+                details: details,
+                startsAt: startsAt,
+                endsAt: hasEndTime ? endsAt : nil,
+                locationName: locationName,
+                coordinate: coordinate,
+                capacity: Int(capacityText)
+            )
+            let event = try await eventViewModel.createEvent(draft: draft, hostProfile: currentProfile)
+            onCreated(event)
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
+private struct EventDetailView: View {
+    let event: LiveEvent
+    let isJoined: Bool
+    let isHost: Bool
+    let distanceMiles: Double?
+    let onJoin: () -> Void
+    let onChat: () -> Void
+    let onRoute: () -> Void
+    let onHost: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                EventPoster(event: event)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 180)
+
+                HStack(spacing: 8) {
+                    EventBadge(text: event.category, color: event.palette.primary)
+                    EventBadge(text: event.priceLabel, color: Color.liveSky)
+                    if let capacity = event.capacity {
+                        EventBadge(text: "\(event.attendeeCount)/\(capacity)", color: Color.liveLemon)
+                    }
+                    Spacer()
+                }
+
+                Text(event.title)
+                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.liveInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(action: onHost) {
+                    HStack(spacing: 10) {
+                        ExplorerAvatar(explorer: event.host, size: 42)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.host.displayName)
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                            Text(event.host.handle)
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.liveMuted)
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(Color.liveInk)
+                    .padding(12)
+                    .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+
+                Text(event.details)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.liveMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(spacing: 8) {
+                    DetailPill(symbolName: "mappin", text: event.locationName)
+                    DetailPill(symbolName: "clock.fill", text: event.timeLabel)
+                    DetailPill(symbolName: "person.2.fill", text: "\(event.attendeeCount) joined")
+                    if let distanceMiles {
+                        DetailPill(symbolName: "location.fill", text: String(format: "%.1f mi away", distanceMiles))
+                    }
+                }
+
+                Map(position: .constant(.region(MKCoordinateRegion(
+                    center: event.coordinate,
+                    span: MKCoordinateSpan(latitudeDelta: 0.045, longitudeDelta: 0.045)
+                )))) {
+                    Annotation(event.title, coordinate: event.coordinate) {
+                        EventMapPin(event: event, isJoined: isJoined)
+                    }
+                }
+                .mapStyle(.standard(elevation: .flat))
+                .frame(height: 190)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .disabled(true)
+
+                HStack(spacing: 9) {
+                    Button(action: onJoin) {
+                        Label(isJoined ? "Joined" : "Join", systemImage: isJoined ? "checkmark.circle.fill" : "plus.circle.fill")
+                            .liveActionButton(fill: isJoined ? Color.liveMint.opacity(0.35) : Color.liveInk, foreground: isJoined ? Color.liveInk : Color.liveOnInk)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onRoute) {
+                        Label("Route", systemImage: "arrow.triangle.turn.up.right.circle.fill")
+                            .liveActionButton(fill: Color.liveSurfaceElevated, foreground: Color.liveInk)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button(action: onChat) {
+                    Label(isJoined ? "Open Chat" : "Join to unlock chat", systemImage: "bubble.left.and.bubble.right.fill")
+                        .liveActionButton(fill: isJoined ? Color.liveLavender.opacity(0.35) : Color.liveSurface, foreground: Color.liveInk)
+                }
+                .disabled(!isJoined)
+                .buttonStyle(.plain)
+
+                HStack(spacing: 9) {
+                    Button {} label: {
+                        Label("Report", systemImage: "flag.fill")
+                            .liveActionButton(fill: Color.liveSurface, foreground: Color.liveInk)
+                    }
+                    .buttonStyle(.plain)
+
+                    if isHost {
+                        Button {} label: {
+                            Label("Edit", systemImage: "pencil")
+                                .liveActionButton(fill: Color.liveSurface, foreground: Color.liveInk)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(18)
+        }
+        .background(Color.liveCanvas)
+    }
+}
+
+private struct EventChatView: View {
+    let event: LiveEvent
+    let currentUserID: UUID?
+    let isJoined: Bool
+
+    @StateObject private var viewModel = EventChatViewModel()
+    @State private var messageText = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let eventID = UUID(uuidString: event.id), isJoined {
+                    chatContent(eventID: eventID)
+                } else {
+                    EmptyStateBlock(
+                        symbolName: "bubble.left.and.bubble.right.fill",
+                        title: isJoined ? "Chat opens for real events" : "Join the event first",
+                        message: isJoined ? "Local preview events do not have a Supabase chat room yet." : "After joining, the event group chat unlocks here."
+                    )
+                    .padding(18)
+                    Spacer()
+                }
+            }
+            .background(Color.liveCanvas)
+            .navigationTitle(event.title)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func chatContent(eventID: UUID) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .tint(Color.liveInk)
+                            .padding(.vertical, 32)
+                    } else if viewModel.messages.isEmpty {
+                        EmptyStateBlock(
+                            symbolName: "bubble.left.fill",
+                            title: "No messages yet",
+                            message: "Say the first thing and make the event feel alive."
+                        )
+                    } else {
+                        ForEach(viewModel.messages) { message in
+                            ChatBubble(message: message)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+
+            if let error = viewModel.errorMessage ?? viewModel.realtimeWarning {
+                Text(error)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.liveAlertRed)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 9) {
+                TextField("Message the event", text: $messageText)
+                    .liveFieldStyle()
+
+                Button {
+                    let body = messageText
+                    messageText = ""
+                    Task {
+                        await viewModel.send(eventID: eventID, currentUserID: currentUserID, body: body)
+                    }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundStyle(Color.liveOnInk)
+                        .frame(width: 42, height: 42)
+                        .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+            .background(.ultraThinMaterial)
+        }
+        .task {
+            await viewModel.load(eventID: eventID, currentUserID: currentUserID)
+            viewModel.startRealtime(eventID: eventID, currentUserID: currentUserID)
+        }
+        .onDisappear {
+            viewModel.stopRealtime()
+        }
+    }
+}
+
+private struct ChatBubble: View {
+    let message: LiveChatMessage
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            if message.isMine {
+                Spacer(minLength: 40)
+            } else {
+                ExplorerAvatar(explorer: message.sender, size: 30)
+            }
+
+            VStack(alignment: message.isMine ? .trailing : .leading, spacing: 4) {
+                if !message.isMine {
+                    Text(message.sender.handle)
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .foregroundStyle(Color.liveMuted)
+                }
+
+                Text(message.body)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(message.isMine ? Color.liveOnInk : Color.liveInk)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(message.isMine ? Color.liveInk : Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Text(message.timeLabel)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.liveMuted)
+            }
+
+            if !message.isMine {
+                Spacer(minLength: 40)
+            }
+        }
+    }
+}
+
 private struct CreateSnapView: View {
+    @ObservedObject var authManager: AuthManager
+    @ObservedObject var snapMapViewModel: SnapMapViewModel
     @ObservedObject var locationStore: LocationStore
     let joinedEvents: [LiveEvent]
+    let onPosted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var caption = ""
+    @State private var locationName = ""
     @State private var photoCount = 1
     @State private var isPartOfEvent = false
     @State private var selectedEventID: String?
     @State private var capturedImage: UIImage?
     @State private var isCameraPresented = false
+    @State private var didAutoOpenCamera = false
+    @State private var isPosting = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -1470,12 +2390,29 @@ private struct CreateSnapView: View {
                     LocationLockRow(locationStore: locationStore)
 
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("Location name")
+                            .font(.system(size: 17, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+
+                        TextField("Griffith Park, Venice Beach, Campus quad", text: $locationName)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+                            .padding(13)
+                            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.liveLavender.opacity(0.24), lineWidth: 1)
+                            }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Snap caption")
                             .font(.system(size: 17, weight: .black, design: .rounded))
                             .foregroundStyle(Color.liveInk)
 
                         TextEditor(text: $caption)
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
                             .frame(minHeight: 112)
                             .padding(10)
                             .scrollContentBackground(.hidden)
@@ -1527,16 +2464,35 @@ private struct CreateSnapView: View {
                         }
                     }
 
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.liveAlertRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 8))
+                    }
+
                     Button {
-                        dismiss()
+                        Task {
+                            await postSnap()
+                        }
                     } label: {
-                        Text("Post live snap")
+                        HStack(spacing: 9) {
+                            if isPosting {
+                                ProgressView()
+                                    .tint(Color.liveOnInk)
+                            }
+
+                            Text(isPosting ? "Posting..." : "Post live snap")
+                        }
                             .font(.system(size: 16, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.white)
+                            .foregroundStyle(Color.liveOnInk)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
                             .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 8))
                     }
+                    .disabled(isPosting)
                     .buttonStyle(.plain)
                 }
                 .padding(18)
@@ -1553,12 +2509,70 @@ private struct CreateSnapView: View {
                 }
             }
         }
+        .tint(Color.liveInk)
         .onAppear {
             locationStore.requestLocation()
+            if capturedImage == nil, !didAutoOpenCamera {
+                didAutoOpenCamera = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    isCameraPresented = true
+                }
+            }
         }
         .sheet(isPresented: $isCameraPresented) {
             CameraCaptureView(image: $capturedImage)
                 .ignoresSafeArea()
+        }
+    }
+
+    private func postSnap() async {
+        errorMessage = nil
+        locationStore.requestLocation()
+
+        guard authManager.isSignedIn else {
+            errorMessage = "Log in before posting a live snap."
+            return
+        }
+
+        guard let capturedImage else {
+            errorMessage = "Take a picture before posting."
+            return
+        }
+
+        guard let coordinate = locationStore.currentCoordinate else {
+            errorMessage = "Current location is required. Allow location access and try again."
+            return
+        }
+
+        let cleanCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanCaption.isEmpty else {
+            errorMessage = "Missing caption."
+            return
+        }
+
+        let cleanLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanLocationName.isEmpty else {
+            errorMessage = "Missing location name."
+            return
+        }
+
+        isPosting = true
+        defer { isPosting = false }
+
+        do {
+            let draft = SnapDraft(
+                image: capturedImage,
+                caption: cleanCaption,
+                locationName: cleanLocationName,
+                coordinate: coordinate,
+                attachedEventID: isPartOfEvent ? selectedEventID : nil
+            )
+
+            _ = try await snapMapViewModel.postSnap(draft: draft, currentProfile: authManager.profile)
+            onPosted()
+            dismiss()
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 }
@@ -1643,7 +2657,7 @@ private struct YesNoButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .black, design: .rounded))
-                .foregroundStyle(isSelected ? Color.white : Color.liveInk)
+                .foregroundStyle(isSelected ? Color.liveOnInk : Color.liveInk)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
                 .background(isSelected ? AnyShapeStyle(Color.liveInk) : AnyShapeStyle(Color.liveSurface), in: RoundedRectangle(cornerRadius: 8))
@@ -1747,6 +2761,7 @@ private struct ExplorerAvatar: View {
 private struct SearchSheetView: View {
     let events: [LiveEvent]
     let joinedEventIDs: Set<String>
+    let onOpenDetail: (LiveEvent) -> Void
     let onRoute: (LiveEvent) -> Void
     let onToggleJoin: (LiveEvent) -> Void
 
@@ -1795,6 +2810,7 @@ private struct SearchSheetView: View {
                                     expandedEventID = expandedEventID == event.id ? nil : event.id
                                 }
                             },
+                            onOpenDetail: { onOpenDetail(event) },
                             onRoute: { onRoute(event) },
                             onToggleJoin: { onToggleJoin(event) }
                         )
@@ -1819,64 +2835,319 @@ private struct SearchSheetView: View {
 
 private struct ProfileSheetView: View {
     let explorer: Explorer
+    let currentExplorer: Explorer
+    let currentProfile: Profile?
     let snaps: [LiveSnap]
+    let events: [LiveEvent]
+    let joinedEventIDs: Set<String>
+    let onMessage: () -> Void
+    let onRefreshProfile: () async -> Void
+    let onLogout: (() -> Void)?
 
     @State private var accountPrivacy: AccountPrivacy = .privateAccount
+    @State private var selectedTab: ProfileContentTab = .map
+    @State private var socialState = ProfileSocialState(followerCount: 0, followingCount: 0, isFollowing: false)
+    @State private var isSocialLoading = false
+    @State private var isEditingProfile = false
+    @State private var editUsername = ""
+    @State private var editDisplayName = ""
+    @State private var editBio = ""
+    @State private var settingsMessage: String?
+    private let profileService = ProfileService()
+
+    private var isSelf: Bool {
+        explorer.id == currentExplorer.id
+    }
+
+    private var targetUserID: UUID? {
+        UUID(uuidString: explorer.id)
+    }
+
+    private var createdEvents: [LiveEvent] {
+        events.filter { $0.host.id == explorer.id || $0.hostID == explorer.id }
+    }
+
+    private var joinedEvents: [LiveEvent] {
+        guard isSelf else { return [] }
+        return events.filter { joinedEventIDs.contains($0.id) }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 17) {
-                HStack(spacing: 13) {
-                    ExplorerAvatar(explorer: explorer, size: 66)
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 14) {
+                        ExplorerAvatar(explorer: explorer, size: 72)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(explorer.displayName)
-                            .font(.system(size: 28, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.liveInk)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(explorer.displayName)
+                                .font(.system(size: 28, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.liveInk)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.76)
 
-                        Text(explorer.handle)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.liveMuted)
+                            Text(explorer.handle)
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.liveMuted)
+
+                            if isSelf {
+                                Text("Your personal map and account settings")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.liveMuted)
+                            }
+                        }
+
+                        Spacer()
+                    }
+
+                    Text(explorer.bio.isEmpty ? "No bio yet." : explorer.bio)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.liveMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(14)
+                .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                    MetricBox(title: "Followers", value: "\(socialState.followerCount)")
+                    MetricBox(title: "Following", value: "\(socialState.followingCount)")
+                    MetricBox(title: "Snaps", value: "\(snaps.count)")
+                    MetricBox(title: "Created", value: "\(createdEvents.count)")
+                    MetricBox(title: "Joined", value: "\(joinedEvents.count)")
+                    MetricBox(title: "Streak", value: "\(explorer.streak)d")
+                }
+
+                if isSelf {
+                    HStack(spacing: 9) {
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                isEditingProfile.toggle()
+                            }
+                        } label: {
+                            Label("Edit Profile", systemImage: "pencil")
+                                .liveActionButton(fill: Color.liveInk, foreground: Color.liveOnInk)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                selectedTab = .settings
+                            }
+                        } label: {
+                            Label("Settings", systemImage: "gearshape.fill")
+                                .liveActionButton(fill: Color.liveSurfaceElevated, foreground: Color.liveInk)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    HStack(spacing: 9) {
+                        Button {
+                            Task { await toggleFollow() }
+                        } label: {
+                            Label(socialState.isFollowing ? "Following" : "Follow", systemImage: socialState.isFollowing ? "checkmark.circle.fill" : "plus.circle.fill")
+                                .liveActionButton(fill: socialState.isFollowing ? Color.liveMint.opacity(0.35) : Color.liveInk, foreground: socialState.isFollowing ? Color.liveInk : Color.liveOnInk)
+                        }
+                        .disabled(isSocialLoading || targetUserID == nil)
+                        .buttonStyle(.plain)
+
+                        Button(action: onMessage) {
+                            Label("Message", systemImage: "bubble.left.fill")
+                                .liveActionButton(fill: Color.liveSurfaceElevated, foreground: Color.liveInk)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
 
-                Text(explorer.bio)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.liveMuted)
-
-                HStack(spacing: 8) {
-                    MetricBox(title: "Score", value: "\(explorer.ventureScore)")
-                    MetricBox(title: "Streak", value: "\(explorer.streak)d")
-                    MetricBox(title: "Snaps", value: "\(snaps.count)")
+                if isEditingProfile {
+                    EditProfileCard(
+                        username: $editUsername,
+                        displayName: $editDisplayName,
+                        bio: $editBio,
+                        isPrivate: accountPrivacy == .privateAccount,
+                        onSave: { await saveProfile() }
+                    )
                 }
 
-                if explorer.id == LiveData.me.id {
+                Picker("Profile section", selection: $selectedTab) {
+                    ForEach(ProfileContentTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                profileTabContent
+
+                if selectedTab == .settings, isSelf {
                     AccountSettingsCard(selection: $accountPrivacy)
-                }
 
-                if !snaps.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Map memories")
-                            .font(.system(size: 20, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.liveInk)
+                        SettingsRow(symbolName: "person.text.rectangle.fill", title: "Account", value: explorer.handle)
+                        SettingsRow(symbolName: "app.badge.fill", title: "App version", value: "MVP TestFlight")
+                        SettingsRow(symbolName: "ladybug.fill", title: "Report a bug", value: "Coming soon")
 
-                        Map(position: .constant(.region(region(for: snaps)))) {
-                            ForEach(snaps) { snap in
-                                Annotation(snap.title, coordinate: snap.coordinate, anchor: .bottom) {
-                                    SnapPhotoPin(snap: snap)
-                                }
-                            }
+                        if let settingsMessage {
+                            Text(settingsMessage)
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.liveMuted)
                         }
-                        .mapStyle(.standard(elevation: .flat))
-                        .frame(height: 230)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .disabled(true)
+                    }
+                    .padding(13)
+                    .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    if let onLogout {
+                        Button(action: onLogout) {
+                            Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+                                .liveActionButton(fill: Color.liveInk, foreground: Color.liveOnInk)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
             .padding(20)
         }
         .background(Color.liveCanvas)
+        .task {
+            seedEditFields()
+            await loadSocialState()
+        }
+    }
+
+    @ViewBuilder
+    private var profileTabContent: some View {
+        switch selectedTab {
+        case .map:
+            if !snaps.isEmpty {
+                Map(position: .constant(.region(region(for: snaps)))) {
+                    ForEach(snaps) { snap in
+                        Annotation(snap.title, coordinate: snap.coordinate, anchor: .bottom) {
+                            SnapPhotoPin(snap: snap)
+                        }
+                    }
+                }
+                .mapStyle(.standard(elevation: .flat))
+                .frame(height: 250)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .disabled(true)
+            } else {
+                EmptyStateBlock(symbolName: "map.fill", title: "No map memories yet", message: isSelf ? "Post your first live snap to start building your personal map." : "This person has no visible snaps yet.")
+            }
+        case .snaps:
+            if snaps.isEmpty {
+                EmptyStateBlock(symbolName: "camera.fill", title: "No snaps yet", message: "Live snaps will collect here after posting.")
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(snaps) { snap in
+                        HStack(spacing: 11) {
+                            SnapImageFrame(snap: snap, height: 78, iconSize: 42, iconFontSize: 22)
+                                .frame(width: 76, height: 78)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(snap.title)
+                                    .font(.system(size: 15, weight: .black, design: .rounded))
+                                    .foregroundStyle(Color.liveInk)
+                                Text("\(snap.locationName) - \(snap.timeLabel)")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.liveMuted)
+                            }
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+        case .events:
+            let displayEvents = isSelf ? joinedEvents : createdEvents
+            if displayEvents.isEmpty {
+                EmptyStateBlock(symbolName: "calendar", title: "No events yet", message: isSelf ? "Events you join or create will show here." : "Created events will show here.")
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(displayEvents) { event in
+                        HStack(spacing: 11) {
+                            EventThumbnail(event: event)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(event.title)
+                                    .font(.system(size: 15, weight: .black, design: .rounded))
+                                    .foregroundStyle(Color.liveInk)
+                                Text("\(event.locationName) - \(event.timeLabel)")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.liveMuted)
+                            }
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+        case .settings:
+            EmptyView()
+        }
+    }
+
+    private func seedEditFields() {
+        guard editUsername.isEmpty, editDisplayName.isEmpty else { return }
+        editUsername = explorer.handle.replacingOccurrences(of: "@", with: "")
+        editDisplayName = explorer.displayName
+        editBio = explorer.bio
+        accountPrivacy = currentProfile?.isPrivate == true ? .privateAccount : .publicAccount
+    }
+
+    private func loadSocialState() async {
+        guard let targetUserID else {
+            socialState = ProfileSocialState(
+                followerCount: explorer.followers,
+                followingCount: explorer.following,
+                isFollowing: false
+            )
+            return
+        }
+
+        do {
+            socialState = try await profileService.socialState(currentUserID: currentProfile?.id, targetUserID: targetUserID)
+        } catch {
+            socialState = ProfileSocialState(
+                followerCount: explorer.followers,
+                followingCount: explorer.following,
+                isFollowing: false
+            )
+        }
+    }
+
+    private func toggleFollow() async {
+        guard let currentUserID = currentProfile?.id, let targetUserID, currentUserID != targetUserID else { return }
+        isSocialLoading = true
+        defer { isSocialLoading = false }
+
+        do {
+            if socialState.isFollowing {
+                try await profileService.unfollow(currentUserID: currentUserID, targetUserID: targetUserID)
+            } else {
+                try await profileService.follow(currentUserID: currentUserID, targetUserID: targetUserID)
+            }
+            await loadSocialState()
+        } catch {
+            settingsMessage = "Follow action did not sync. Check Supabase RLS."
+        }
+    }
+
+    private func saveProfile() async {
+        guard let userID = currentProfile?.id else { return }
+        do {
+            _ = try await profileService.updateProfile(
+                userID: userID,
+                username: editUsername,
+                displayName: editDisplayName,
+                bio: editBio,
+                isPrivate: accountPrivacy == .privateAccount
+            )
+            settingsMessage = "Profile saved."
+            await onRefreshProfile()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                isEditingProfile = false
+            }
+        } catch {
+            settingsMessage = error.localizedDescription
+        }
     }
 
     private func region(for snaps: [LiveSnap]) -> MKCoordinateRegion {
@@ -1896,6 +3167,93 @@ private struct ProfileSheetView: View {
                 longitudeDelta: max(0.08, (maxLongitude - minLongitude) * 1.8)
             )
         )
+    }
+}
+
+private enum ProfileContentTab: String, CaseIterable, Identifiable {
+    case map = "Map"
+    case snaps = "Snaps"
+    case events = "Events"
+    case settings = "Settings"
+
+    var id: String { rawValue }
+}
+
+private struct EditProfileCard: View {
+    @Binding var username: String
+    @Binding var displayName: String
+    @Binding var bio: String
+    let isPrivate: Bool
+    let onSave: () async -> Void
+
+    @State private var isSaving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Edit profile")
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+
+            TextField("Username", text: $username)
+                .liveFieldStyle()
+                .textInputAutocapitalization(.never)
+
+            TextField("Display name", text: $displayName)
+                .liveFieldStyle()
+
+            TextEditor(text: $bio)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+                .frame(minHeight: 88)
+                .padding(10)
+                .scrollContentBackground(.hidden)
+                .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
+
+            Text(isPrivate ? "Private account placeholder enabled." : "Public account placeholder enabled.")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+
+            Button {
+                Task {
+                    isSaving = true
+                    await onSave()
+                    isSaving = false
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if isSaving {
+                        ProgressView()
+                            .tint(Color.liveOnInk)
+                    }
+                    Text(isSaving ? "Saving..." : "Save profile")
+                }
+                .liveActionButton(fill: Color.liveInk, foreground: Color.liveOnInk)
+            }
+            .disabled(isSaving)
+            .buttonStyle(.plain)
+        }
+        .padding(13)
+        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct SettingsRow: View {
+    let symbolName: String
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            PixelMiniSymbol(symbolName: symbolName, color: Color.liveInk)
+            Text(title)
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+            Spacer()
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+                .lineLimit(1)
+        }
     }
 }
 
@@ -2082,6 +3440,198 @@ private struct StreakCalendarView: View {
     }
 }
 
+private struct InboxView: View {
+    let currentUserID: UUID?
+    let onOpenDM: (Profile) -> Void
+
+    @State private var profiles: [Profile] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    private let dmService = DMService()
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 11) {
+                    if isLoading {
+                        ProgressView()
+                            .tint(Color.liveInk)
+                            .padding(.vertical, 34)
+                    } else if profiles.isEmpty {
+                        EmptyStateBlock(
+                            symbolName: "person.2.fill",
+                            title: "No people yet",
+                            message: "Once profiles are readable in Supabase, they will show here for direct messages."
+                        )
+                    } else {
+                        ForEach(profiles) { profile in
+                            Button {
+                                onOpenDM(profile)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    ExplorerAvatar(explorer: profile.explorer, size: 48)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(profile.displayName)
+                                            .font(.system(size: 16, weight: .black, design: .rounded))
+                                            .foregroundStyle(Color.liveInk)
+
+                                        Text(profile.handle)
+                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                            .foregroundStyle(Color.liveMuted)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "bubble.left.fill")
+                                        .font(.system(size: 15, weight: .black))
+                                        .foregroundStyle(Color.liveInk)
+                                }
+                                .padding(12)
+                                .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.liveAlertRed)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+                .padding(18)
+            }
+            .background(Color.liveCanvas)
+            .navigationTitle("Messages")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .task {
+            await loadProfiles()
+        }
+    }
+
+    private func loadProfiles() async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            profiles = try await dmService.readableProfiles(excluding: currentUserID)
+        } catch {
+            errorMessage = "Profiles could not load yet. Check Supabase RLS and auth."
+        }
+
+        isLoading = false
+    }
+}
+
+private struct DirectMessageView: View {
+    let targetExplorer: Explorer
+    let currentUserID: UUID?
+
+    @StateObject private var viewModel = DirectMessageViewModel()
+    @State private var messageText = ""
+
+    private var targetProfile: Profile? {
+        Profile.liveProfile(from: targetExplorer)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let targetProfile {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            HStack(spacing: 12) {
+                                ExplorerAvatar(explorer: targetExplorer, size: 52)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(targetExplorer.displayName)
+                                        .font(.system(size: 18, weight: .black, design: .rounded))
+                                        .foregroundStyle(Color.liveInk)
+                                    Text(targetExplorer.handle)
+                                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                                        .foregroundStyle(Color.liveMuted)
+                                }
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 12))
+
+                            if viewModel.isLoading {
+                                ProgressView()
+                                    .tint(Color.liveInk)
+                                    .padding(.vertical, 32)
+                            } else if viewModel.messages.isEmpty {
+                                EmptyStateBlock(
+                                    symbolName: "bubble.left.fill",
+                                    title: "Start the DM",
+                                    message: "Keep it simple: say where you saw their snap or what event you both joined."
+                                )
+                            } else {
+                                ForEach(viewModel.messages) { message in
+                                    ChatBubble(message: message)
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+
+                    if let error = viewModel.errorMessage ?? viewModel.realtimeWarning {
+                        Text(error)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.liveAlertRed)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    HStack(spacing: 9) {
+                        TextField("Message \(targetExplorer.handle)", text: $messageText)
+                            .liveFieldStyle()
+
+                        Button {
+                            let body = messageText
+                            messageText = ""
+                            Task {
+                                await viewModel.send(currentUserID: currentUserID, targetProfile: targetProfile, body: body)
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 15, weight: .black))
+                                .foregroundStyle(Color.liveOnInk)
+                                .frame(width: 42, height: 42)
+                                .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(12)
+                    .background(.ultraThinMaterial)
+                    .task {
+                        await viewModel.prepare(currentUserID: currentUserID, targetProfile: targetProfile)
+                    }
+                    .onDisappear {
+                        viewModel.stopRealtime()
+                    }
+                } else {
+                    EmptyStateBlock(
+                        symbolName: "bubble.left.and.bubble.right.fill",
+                        title: "Real profile needed",
+                        message: "DMs work with Supabase profiles. Local demo profiles are display-only."
+                    )
+                    .padding(18)
+                    Spacer()
+                }
+            }
+            .background(Color.liveCanvas)
+            .navigationTitle("Direct Message")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
 private struct GroupsSheetView: View {
     private let groups = [
         ("Beach Crew", "Volleyball, sunsets, beach runs", "figure.volleyball", SnapPalette.coral),
@@ -2238,6 +3788,14 @@ private extension EventPulse {
 }
 
 private extension LiveEvent {
+    var capacityText: String {
+        if let capacity {
+            "\(attendeeCount)/\(capacity)"
+        } else {
+            "\(attendeeCount)"
+        }
+    }
+
     var feedBadge: String {
         if pulse == .fresh {
             return "New"
@@ -2262,10 +3820,54 @@ private extension LiveEvent {
     }
 }
 
-private extension Color {
+private extension Profile {
+    static func liveProfile(from explorer: Explorer) -> Profile? {
+        guard let id = UUID(uuidString: explorer.id) else { return nil }
+        return Profile(
+            id: id,
+            username: explorer.handle.replacingOccurrences(of: "@", with: ""),
+            displayName: explorer.displayName,
+            bio: explorer.bio,
+            avatarURL: nil,
+            isPrivate: false,
+            isVerified: false,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
+}
+
+private extension View {
+    func liveFieldStyle() -> some View {
+        self
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
+            .foregroundStyle(Color.liveInk)
+            .padding(13)
+            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.liveStroke, lineWidth: 1)
+            }
+    }
+
+    func liveActionButton(fill: Color, foreground: Color) -> some View {
+        self
+            .font(.system(size: 14, weight: .black, design: .rounded))
+            .foregroundStyle(foreground)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+extension Color {
     static let liveInk = dynamicColor(
         light: UIColor(red: 0.05, green: 0.07, blue: 0.17, alpha: 1),
         dark: UIColor(red: 0.94, green: 0.96, blue: 1.0, alpha: 1)
+    )
+    static let liveOnInk = dynamicColor(
+        light: UIColor.white,
+        dark: UIColor(red: 0.035, green: 0.045, blue: 0.11, alpha: 1)
     )
     static let liveMuted = dynamicColor(
         light: UIColor(red: 0.35, green: 0.38, blue: 0.53, alpha: 1),

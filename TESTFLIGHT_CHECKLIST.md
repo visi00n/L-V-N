@@ -8,6 +8,8 @@
 - Set version/build numbers before each upload.
 - Add a real App Icon before external testing.
 - Confirm the display name is `L!V!N` while code/project identifiers can remain `LIVE`.
+- App encryption answer for the current prototype: `None of the algorithms mentioned above`.
+- Confirm `ITSAppUsesNonExemptEncryption` is set to `NO` unless future code adds custom/non-Apple encryption.
 - Run the app on at least one real iPhone before submitting to TestFlight.
 
 ## First Community Test

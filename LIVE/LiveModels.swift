@@ -57,6 +57,127 @@ enum EventPulse: Equatable {
     case steady
 }
 
+enum LiveEventCategory: String, CaseIterable, Identifiable {
+    case social = "Social"
+    case sports = "Sports"
+    case fitness = "Fitness"
+    case hiking = "Hiking"
+    case food = "Food"
+    case music = "Music"
+    case creator = "Creator"
+    case study = "Study"
+    case church = "Church"
+    case travel = "Travel"
+    case other = "Other"
+
+    var id: String { rawValue }
+
+    init(label: String) {
+        let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "sports", "games":
+            self = .sports
+        case "fitness", "wellness":
+            self = .fitness
+        case "hiking", "outdoors":
+            self = .hiking
+        case "food":
+            self = .food
+        case "music":
+            self = .music
+        case "creator", "creative", "style", "culture":
+            self = .creator
+        case "study":
+            self = .study
+        case "church":
+            self = .church
+        case "travel":
+            self = .travel
+        case "social", "community", "open venture":
+            self = .social
+        default:
+            self = .other
+        }
+    }
+
+    var palette: SnapPalette {
+        switch self {
+        case .social, .creator:
+            .lavender
+        case .sports:
+            .coral
+        case .fitness, .hiking:
+            .mint
+        case .food, .study, .church:
+            .lemon
+        case .music, .travel, .other:
+            .sky
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .social:
+            "person.2.fill"
+        case .sports:
+            "sportscourt.fill"
+        case .fitness:
+            "figure.run"
+        case .hiking:
+            "figure.hiking"
+        case .food:
+            "fork.knife"
+        case .music:
+            "music.note"
+        case .creator:
+            "camera.fill"
+        case .study:
+            "book.fill"
+        case .church:
+            "building.columns.fill"
+        case .travel:
+            "map.fill"
+        case .other:
+            "sparkles"
+        }
+    }
+}
+
+enum EventRadius: String, CaseIterable, Identifiable {
+    case five = "5 mi"
+    case ten = "10 mi"
+    case twentyFive = "25 mi"
+    case fifty = "50 mi"
+    case hundred = "100 mi"
+    case anywhere = "Anywhere"
+
+    var id: String { rawValue }
+
+    var miles: Double? {
+        switch self {
+        case .five:
+            5
+        case .ten:
+            10
+        case .twentyFive:
+            25
+        case .fifty:
+            50
+        case .hundred:
+            100
+        case .anywhere:
+            nil
+        }
+    }
+}
+
+enum MapMode: String, CaseIterable, Identifiable {
+    case `public` = "Public"
+    case personal = "Personal"
+
+    var id: String { rawValue }
+}
+
 struct Explorer: Identifiable, Equatable {
     let id: String
     let handle: String
@@ -83,6 +204,48 @@ struct LiveEvent: Identifiable, Equatable {
     let palette: SnapPalette
     let isSignedUp: Bool
     let pulse: EventPulse
+    let hostID: String?
+    let startsAt: Date?
+    let endsAt: Date?
+    let capacity: Int?
+
+    init(
+        id: String,
+        title: String,
+        host: Explorer,
+        category: String,
+        locationName: String,
+        timeLabel: String,
+        attendeeCount: Int,
+        priceLabel: String,
+        details: String,
+        coordinate: CLLocationCoordinate2D,
+        palette: SnapPalette,
+        isSignedUp: Bool,
+        pulse: EventPulse,
+        hostID: String? = nil,
+        startsAt: Date? = nil,
+        endsAt: Date? = nil,
+        capacity: Int? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.host = host
+        self.category = category
+        self.locationName = locationName
+        self.timeLabel = timeLabel
+        self.attendeeCount = attendeeCount
+        self.priceLabel = priceLabel
+        self.details = details
+        self.coordinate = coordinate
+        self.palette = palette
+        self.isSignedUp = isSignedUp
+        self.pulse = pulse
+        self.hostID = hostID
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.capacity = capacity
+    }
 
     static func == (lhs: LiveEvent, rhs: LiveEvent) -> Bool {
         lhs.id == rhs.id
@@ -100,6 +263,36 @@ struct LiveSnap: Identifiable, Equatable {
     let imageCount: Int
     let palette: SnapPalette
     let attachedEventID: String?
+    let firstMediaPath: String?
+    let imageURL: URL?
+
+    init(
+        id: String,
+        title: String,
+        caption: String,
+        creator: Explorer,
+        locationName: String,
+        timeLabel: String,
+        coordinate: CLLocationCoordinate2D,
+        imageCount: Int,
+        palette: SnapPalette,
+        attachedEventID: String?,
+        firstMediaPath: String? = nil,
+        imageURL: URL? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.caption = caption
+        self.creator = creator
+        self.locationName = locationName
+        self.timeLabel = timeLabel
+        self.coordinate = coordinate
+        self.imageCount = imageCount
+        self.palette = palette
+        self.attachedEventID = attachedEventID
+        self.firstMediaPath = firstMediaPath
+        self.imageURL = imageURL
+    }
 
     static func == (lhs: LiveSnap, rhs: LiveSnap) -> Bool {
         lhs.id == rhs.id
@@ -238,5 +431,14 @@ enum LiveData {
 
     static var signedUpEvents: [LiveEvent] {
         events.filter(\.isSignedUp)
+    }
+}
+
+extension LiveEvent {
+    func distanceMiles(from coordinate: CLLocationCoordinate2D?) -> Double? {
+        guard let coordinate else { return nil }
+        let start = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let end = CLLocation(latitude: self.coordinate.latitude, longitude: self.coordinate.longitude)
+        return start.distance(from: end) / 1_609.344
     }
 }
