@@ -7,9 +7,9 @@ This folder contains starter Supabase Edge Functions for the first paid-ticket p
 Run these files in the Supabase SQL Editor for a fresh dev project:
 
 1. `schema.sql`
-2. `rls_policies.sql`
-3. `storage_policies.sql`
-4. `rpc_functions.sql`
+2. `rpc_functions.sql`
+3. `rls_policies.sql`
+4. `storage_policies.sql`
 5. `realtime_tables.sql`
 
 The live dev project currently uses `snaps.user_id` and the `create_direct_conversation(target_user_id uuid)` RPC. Keep those names aligned with the Swift models.

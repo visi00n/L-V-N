@@ -22,20 +22,50 @@ final class DMService {
             .filter { $0.id != userID }
     }
 
-    func findOrCreateConversation(currentUserID: UUID, targetUserID: UUID) async throws -> UUID {
-        let memberResponse: PostgrestResponse<[DirectConversationMember]> = try await supabase
-            .from("direct_conversation_members")
-            .select()
+    struct RecentConversationRow: Decodable {
+        let conversationID: UUID
+        let targetUserID: UUID
+        let targetHandle: String
+        let targetDisplayName: String
+        let targetAvatarURL: String?
+        let targetBio: String?
+        let lastMessage: String
+        let updatedAt: Date
+
+        enum CodingKeys: String, CodingKey {
+            case conversationID = "conversation_id"
+            case targetUserID = "target_user_id"
+            case targetHandle = "target_handle"
+            case targetDisplayName = "target_display_name"
+            case targetAvatarURL = "target_avatar_url"
+            case targetBio = "target_bio"
+            case lastMessage = "last_message"
+            case updatedAt = "updated_at"
+        }
+    }
+
+    func fetchRecentConversations() async throws -> [InboxThread] {
+        let response: PostgrestResponse<[RecentConversationRow]> = try await supabase
+            .rpc("get_recent_conversations")
             .execute()
 
-        let grouped = Dictionary(grouping: memberResponse.value, by: \.conversationID)
-        if let existing = grouped.first(where: { _, members in
-            let ids = Set(members.map(\.userID))
-            return ids.contains(currentUserID) && ids.contains(targetUserID)
-        })?.key {
-            return existing
+        return response.value.map { row in
+            let profile = Profile(
+                id: row.targetUserID,
+                username: row.targetHandle,
+                displayName: row.targetDisplayName,
+                bio: row.targetBio ?? "",
+                avatarURL: row.targetAvatarURL,
+                isPrivate: false,
+                isVerified: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            return InboxThread(id: row.conversationID.uuidString, profile: profile, lastMessage: row.lastMessage)
         }
+    }
 
+    func findOrCreateConversation(currentUserID: UUID, targetUserID: UUID) async throws -> UUID {
         let conversationID: UUID = try await supabase
             .rpc(
                 "create_direct_conversation",
@@ -184,7 +214,12 @@ final class DirectMessageViewModel: ObservableObject {
     private func listen(conversationID: UUID, currentUserID: UUID, targetProfile: Profile) async {
         let channel = supabase.channel("dm:\(conversationID.uuidString)")
         realtimeChannel = channel
-        let insertions = channel.postgresChange(InsertAction.self, schema: "public", table: "direct_messages")
+        let insertions = channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "direct_messages",
+            filter: .eq("conversation_id", value: conversationID.uuidString)
+        )
 
         do {
             try await channel.subscribeWithError()

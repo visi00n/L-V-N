@@ -3444,7 +3444,7 @@ private struct InboxView: View {
     let currentUserID: UUID?
     let onOpenDM: (Profile) -> Void
 
-    @State private var profiles: [Profile] = []
+    @State private var threads: [InboxThread] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     private let dmService = DMService()
@@ -3457,28 +3457,29 @@ private struct InboxView: View {
                         ProgressView()
                             .tint(Color.liveInk)
                             .padding(.vertical, 34)
-                    } else if profiles.isEmpty {
+                    } else if threads.isEmpty {
                         EmptyStateBlock(
                             symbolName: "person.2.fill",
-                            title: "No people yet",
-                            message: "Once profiles are readable in Supabase, they will show here for direct messages."
+                            title: "No conversations yet",
+                            message: "Start a chat from a friend's profile."
                         )
                     } else {
-                        ForEach(profiles) { profile in
+                        ForEach(threads) { thread in
                             Button {
-                                onOpenDM(profile)
+                                onOpenDM(thread.profile)
                             } label: {
                                 HStack(spacing: 12) {
-                                    ExplorerAvatar(explorer: profile.explorer, size: 48)
+                                    ExplorerAvatar(explorer: thread.profile.explorer, size: 48)
 
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(profile.displayName)
+                                        Text(thread.profile.displayName)
                                             .font(.system(size: 16, weight: .black, design: .rounded))
                                             .foregroundStyle(Color.liveInk)
 
-                                        Text(profile.handle)
-                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                        Text(thread.lastMessage)
+                                            .font(.system(size: 13, weight: .bold, design: .rounded))
                                             .foregroundStyle(Color.liveMuted)
+                                            .lineLimit(1)
                                     }
 
                                     Spacer()
@@ -3510,18 +3511,18 @@ private struct InboxView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .task {
-            await loadProfiles()
+            await loadThreads()
         }
     }
 
-    private func loadProfiles() async {
+    private func loadThreads() async {
         isLoading = true
         errorMessage = nil
 
         do {
-            profiles = try await dmService.readableProfiles(excluding: currentUserID)
+            threads = try await dmService.fetchRecentConversations()
         } catch {
-            errorMessage = "Profiles could not load yet. Check Supabase RLS and auth."
+            errorMessage = "Conversations could not load yet. Check Supabase RLS and auth."
         }
 
         isLoading = false

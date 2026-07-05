@@ -143,84 +143,27 @@ with check (
   )
 );
 
-create policy "dm conversations readable by members"
+create policy "dm conversations readable by friends"
 on public.direct_conversations for select
 to authenticated
-using (
-  exists (
-    select 1 from public.direct_conversation_members dcm
-    where dcm.conversation_id = direct_conversations.id
-    and dcm.user_id = (select auth.uid())
-  )
-);
+using (private.can_access_direct_conversation(id, (select auth.uid())));
 
-create policy "users create own direct_conversations"
-on public.direct_conversations for insert
-to authenticated
-with check (created_by = (select auth.uid()));
-
-create policy "dm members readable by members"
+create policy "dm members readable by friends"
 on public.direct_conversation_members for select
 to authenticated
-using (
-  exists (
-    select 1 from public.direct_conversation_members mine
-    where mine.conversation_id = direct_conversation_members.conversation_id
-    and mine.user_id = (select auth.uid())
-  )
-);
+using (private.can_access_direct_conversation(conversation_id, (select auth.uid())));
 
-create policy "users can insert direct_conversation_members safely"
-on public.direct_conversation_members for insert
-to authenticated
-with check (
-  (
-    user_id = (select auth.uid())
-    and not exists (
-      select 1 from public.direct_conversation_members existing
-      where existing.conversation_id = direct_conversation_members.conversation_id
-    )
-  )
-  or (
-    user_id <> (select auth.uid())
-    and exists (
-      select 1 from public.profiles target_profile
-      where target_profile.id = direct_conversation_members.user_id
-    )
-    and exists (
-      select 1 from public.direct_conversation_members mine
-      where mine.conversation_id = direct_conversation_members.conversation_id
-      and mine.user_id = (select auth.uid())
-    )
-    and (
-      select count(*)
-      from public.direct_conversation_members existing
-      where existing.conversation_id = direct_conversation_members.conversation_id
-    ) = 1
-  )
-);
-
-create policy "dm messages readable by members"
+create policy "dm messages readable by friends"
 on public.direct_messages for select
 to authenticated
-using (
-  exists (
-    select 1 from public.direct_conversation_members dcm
-    where dcm.conversation_id = direct_messages.conversation_id
-    and dcm.user_id = (select auth.uid())
-  )
-);
+using (private.can_access_direct_conversation(conversation_id, (select auth.uid())));
 
-create policy "dm members send messages"
+create policy "friends send direct messages"
 on public.direct_messages for insert
 to authenticated
 with check (
   sender_id = (select auth.uid())
-  and exists (
-    select 1 from public.direct_conversation_members dcm
-    where dcm.conversation_id = direct_messages.conversation_id
-    and dcm.user_id = (select auth.uid())
-  )
+  and private.can_access_direct_conversation(conversation_id, (select auth.uid()))
 );
 
 create policy "users create reports"

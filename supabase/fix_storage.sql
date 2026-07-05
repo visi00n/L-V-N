@@ -1,3 +1,6 @@
+-- L!V!N scoped Storage upgrade: buckets plus upload/display policies.
+-- Rerunnable in the Supabase SQL Editor. Does not modify or delete user files.
+
 begin;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -156,3 +159,28 @@ to public
 using (bucket_id = 'event-covers');
 
 commit;
+
+select id, public, file_size_limit, allowed_mime_types
+from storage.buckets
+where id in ('event-covers', 'snap-media', 'avatars')
+order by id;
+
+select policyname, cmd, roles
+from pg_policies
+where schemaname = 'storage'
+  and tablename = 'objects'
+  and policyname in (
+    'authenticated users upload snap media',
+    'authenticated users read snap media',
+    'users update own snap media',
+    'users delete own snap media',
+    'authenticated users upload avatars',
+    'users update own avatars',
+    'users delete own avatars',
+    'public avatar read',
+    'event_covers users can upload own folder',
+    'event_covers users can update own folder',
+    'event_covers users can delete own folder',
+    'public event covers read'
+  )
+order by policyname;

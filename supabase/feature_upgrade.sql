@@ -1,16 +1,7 @@
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-security invoker
-set search_path = public, pg_temp
-as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
+-- L!V!N scoped DM upgrade: mutual-follower conversations and inbox RPC.
+-- Rerunnable in the Supabase SQL Editor. Does not modify or delete user data.
 
-revoke execute on function public.set_updated_at() from public, anon, authenticated;
+begin;
 
 create schema if not exists private;
 grant usage on schema private to authenticated;
@@ -175,19 +166,26 @@ as $$
     p.avatar_url as target_avatar_url,
     p.bio as target_bio,
     coalesce((
-      select body from public.direct_messages m
+      select m.body
+      from public.direct_messages m
       where m.conversation_id = c.id
-      order by created_at desc limit 1
+      order by m.created_at desc
+      limit 1
     ), 'Tap to chat') as last_message,
     coalesce((
-      select created_at from public.direct_messages m
+      select m.created_at
+      from public.direct_messages m
       where m.conversation_id = c.id
-      order by created_at desc limit 1
+      order by m.created_at desc
+      limit 1
     ), c.created_at) as updated_at
   from public.direct_conversations c
-  join public.direct_conversation_members mine on mine.conversation_id = c.id
-  join public.direct_conversation_members other on other.conversation_id = c.id
-  join public.profiles p on p.id = other.user_id
+  join public.direct_conversation_members mine
+    on mine.conversation_id = c.id
+  join public.direct_conversation_members other
+    on other.conversation_id = c.id
+  join public.profiles p
+    on p.id = other.user_id
   where mine.user_id = (select auth.uid())
     and other.user_id <> (select auth.uid())
   order by updated_at desc;
@@ -195,3 +193,61 @@ $$;
 
 revoke all on function public.get_recent_conversations() from PUBLIC, anon;
 grant execute on function public.get_recent_conversations() to authenticated;
+
+alter table public.direct_conversations enable row level security;
+alter table public.direct_conversation_members enable row level security;
+alter table public.direct_messages enable row level security;
+
+drop policy if exists "dm conversations readable by members" on public.direct_conversations;
+drop policy if exists "members can read direct_conversations" on public.direct_conversations;
+drop policy if exists "users create own direct_conversations" on public.direct_conversations;
+drop policy if exists "dm conversations readable by friends" on public.direct_conversations;
+
+drop policy if exists "dm members readable by members" on public.direct_conversation_members;
+drop policy if exists "members can read direct_conversation_members" on public.direct_conversation_members;
+drop policy if exists "users can insert direct_conversation_members safely" on public.direct_conversation_members;
+drop policy if exists "users can delete own direct_conversation_members" on public.direct_conversation_members;
+drop policy if exists "dm members readable by friends" on public.direct_conversation_members;
+
+drop policy if exists "dm messages readable by members" on public.direct_messages;
+drop policy if exists "members can read direct_messages" on public.direct_messages;
+drop policy if exists "dm members send messages" on public.direct_messages;
+drop policy if exists "members can insert direct_messages" on public.direct_messages;
+drop policy if exists "dm messages readable by friends" on public.direct_messages;
+drop policy if exists "friends send direct messages" on public.direct_messages;
+
+create policy "dm conversations readable by friends"
+on public.direct_conversations for select
+to authenticated
+using (private.can_access_direct_conversation(id, (select auth.uid())));
+
+create policy "dm members readable by friends"
+on public.direct_conversation_members for select
+to authenticated
+using (private.can_access_direct_conversation(conversation_id, (select auth.uid())));
+
+create policy "dm messages readable by friends"
+on public.direct_messages for select
+to authenticated
+using (private.can_access_direct_conversation(conversation_id, (select auth.uid())));
+
+create policy "friends send direct messages"
+on public.direct_messages for insert
+to authenticated
+with check (
+  sender_id = (select auth.uid())
+  and private.can_access_direct_conversation(conversation_id, (select auth.uid()))
+);
+
+grant select on public.profiles,
+  public.direct_conversations, public.direct_conversation_members, public.direct_messages
+to authenticated;
+grant insert on public.direct_messages to authenticated;
+
+commit;
+
+select schemaname, tablename, policyname, cmd
+from pg_policies
+where schemaname = 'public'
+  and tablename in ('direct_conversations', 'direct_conversation_members', 'direct_messages')
+order by tablename, policyname;
