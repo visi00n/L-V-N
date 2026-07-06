@@ -276,6 +276,13 @@ create index if not exists snap_comments_snap_id_created_at_idx on public.snap_c
 alter table public.snap_likes enable row level security;
 alter table public.snap_comments enable row level security;
 
+drop policy if exists "snap likes readable" on public.snap_likes;
+drop policy if exists "users create own snap likes" on public.snap_likes;
+drop policy if exists "users delete own snap likes" on public.snap_likes;
+drop policy if exists "snap comments readable" on public.snap_comments;
+drop policy if exists "users create own snap comments" on public.snap_comments;
+drop policy if exists "users delete own snap comments" on public.snap_comments;
+
 create policy "snap likes readable"
 on public.snap_likes for select
 to authenticated
@@ -316,8 +323,14 @@ on public.snap_comments for delete
 to authenticated
 using (user_id = (select auth.uid()));
 
-create or replace function get_snap_stats(p_snap_id uuid, p_user_id uuid)
-returns jsonb as $$
+grant select, insert, delete on public.snap_likes, public.snap_comments to authenticated;
+
+create or replace function public.get_snap_stats(p_snap_id uuid, p_user_id uuid)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = pg_catalog, public, pg_temp
+as $$
 declare
   v_likes_count int;
   v_comments_count int;
@@ -333,10 +346,14 @@ begin
     'has_liked', v_has_liked
   );
 end;
-$$ language plpgsql security definer;
+$$;
 
-create or replace function get_public_snaps_with_stats(p_user_id uuid)
-returns setof jsonb as $$
+create or replace function public.get_public_snaps_with_stats(p_user_id uuid)
+returns setof jsonb
+language plpgsql
+security invoker
+set search_path = pg_catalog, public, pg_temp
+as $$
 begin
   return query
   select jsonb_build_object(
@@ -350,4 +367,9 @@ begin
   order by s.created_at desc
   limit 100;
 end;
-$$ language plpgsql security definer;
+$$;
+
+revoke all on function public.get_snap_stats(uuid, uuid) from PUBLIC, anon;
+revoke all on function public.get_public_snaps_with_stats(uuid) from PUBLIC, anon;
+grant execute on function public.get_snap_stats(uuid, uuid) to authenticated;
+grant execute on function public.get_public_snaps_with_stats(uuid) to authenticated;

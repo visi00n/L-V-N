@@ -4023,7 +4023,6 @@ private struct InboxView: View {
                                             .font(.system(size: 16, weight: .black, design: .rounded))
                                             .foregroundStyle(Color.liveInk)
 
-                                        
                                         Text(thread.lastMessage)
                                             .font(.system(size: 13, weight: .bold, design: .rounded))
                                             .foregroundStyle(Color.liveMuted)

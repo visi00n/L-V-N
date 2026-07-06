@@ -34,12 +34,20 @@ final class ProfileService {
             isPrivate: isPrivate
         )
 
-        let response: PostgrestResponse<[Profile]> = try await supabase
-            .from("profiles")
-            .update(update)
-            .eq("id", value: userID)
-            .select()
-            .execute()
+        let response: PostgrestResponse<[Profile]>
+        do {
+            response = try await supabase
+                .from("profiles")
+                .update(update)
+                .eq("id", value: userID)
+                .select()
+                .execute()
+        } catch {
+            if Self.isDuplicateUsernameError(error) {
+                throw ProfileServiceError.message("That username is already taken.")
+            }
+            throw error
+        }
 
         guard let profile = response.value.first else {
             throw ProfileServiceError.message("Profile was not returned after saving.")
@@ -124,6 +132,12 @@ final class ProfileService {
 
         return profiles.value
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private static func isDuplicateUsernameError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("profiles_username_key")
+            || (message.contains("duplicate key") && message.contains("username"))
     }
 }
 
