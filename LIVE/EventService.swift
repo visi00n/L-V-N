@@ -12,7 +12,7 @@ import Supabase
 
 struct EventDraft {
     let title: String
-    let category: LiveEventCategory
+    let category: String
     let details: String
     let startsAt: Date
     let endsAt: Date?
@@ -64,7 +64,7 @@ final class EventService {
             hostID: hostProfile.id,
             title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
             details: draft.details.trimmingCharacters(in: .whitespacesAndNewlines),
-            category: draft.category.rawValue,
+            category: draft.category.trimmingCharacters(in: .whitespacesAndNewlines),
             startsAt: draft.startsAt,
             endsAt: draft.endsAt,
             locationName: draft.locationName.trimmingCharacters(in: .whitespacesAndNewlines),

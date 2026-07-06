@@ -159,3 +159,26 @@ alter table public.direct_conversation_members enable row level security;
 alter table public.direct_messages enable row level security;
 alter table public.reports enable row level security;
 alter table public.device_tokens enable row level security;
+
+create table if not exists public.snap_likes (
+  id uuid primary key default gen_random_uuid(),
+  snap_id uuid not null references public.snaps(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (snap_id, user_id)
+);
+
+create table if not exists public.snap_comments (
+  id uuid primary key default gen_random_uuid(),
+  snap_id uuid not null references public.snaps(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists snap_likes_snap_id_idx on public.snap_likes(snap_id);
+create index if not exists snap_likes_user_id_idx on public.snap_likes(user_id);
+create index if not exists snap_comments_snap_id_created_at_idx on public.snap_comments(snap_id, created_at);
+
+alter table public.snap_likes enable row level security;
+alter table public.snap_comments enable row level security;

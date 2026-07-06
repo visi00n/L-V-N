@@ -53,12 +53,14 @@ final class ProfileService {
             .from("follows")
             .select()
             .eq("following_id", value: targetUserID)
+            .eq("status", value: "approved")
             .execute()
 
         let following: PostgrestResponse<[Follow]> = try await supabase
             .from("follows")
             .select()
             .eq("follower_id", value: targetUserID)
+            .eq("status", value: "approved")
             .execute()
 
         var isFollowing = false
@@ -71,6 +73,14 @@ final class ProfileService {
             followingCount: following.value.count,
             isFollowing: isFollowing
         )
+    }
+
+    func followers(of userID: UUID) async throws -> [Profile] {
+        try await socialProfiles(for: userID, showingFollowers: true)
+    }
+
+    func following(of userID: UUID) async throws -> [Profile] {
+        try await socialProfiles(for: userID, showingFollowers: false)
     }
 
     func follow(currentUserID: UUID, targetUserID: UUID) async throws {
@@ -93,6 +103,27 @@ final class ProfileService {
             .eq("follower_id", value: currentUserID)
             .eq("following_id", value: targetUserID)
             .execute()
+    }
+
+    private func socialProfiles(for userID: UUID, showingFollowers: Bool) async throws -> [Profile] {
+        let response: PostgrestResponse<[Follow]> = try await supabase
+            .from("follows")
+            .select()
+            .eq(showingFollowers ? "following_id" : "follower_id", value: userID)
+            .eq("status", value: "approved")
+            .execute()
+
+        let profileIDs = Set(response.value.map { showingFollowers ? $0.followerID : $0.followingID })
+        guard !profileIDs.isEmpty else { return [] }
+
+        let profiles: PostgrestResponse<[Profile]> = try await supabase
+            .from("profiles")
+            .select()
+            .in("id", values: Array(profileIDs))
+            .execute()
+
+        return profiles.value
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 }
 

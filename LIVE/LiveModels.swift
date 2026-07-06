@@ -265,6 +265,9 @@ struct LiveSnap: Identifiable, Equatable {
     let attachedEventID: String?
     let firstMediaPath: String?
     let imageURL: URL?
+    var likesCount: Int
+    var commentsCount: Int
+    var hasLiked: Bool
 
     init(
         id: String,
@@ -276,9 +279,12 @@ struct LiveSnap: Identifiable, Equatable {
         coordinate: CLLocationCoordinate2D,
         imageCount: Int,
         palette: SnapPalette,
-        attachedEventID: String?,
+        attachedEventID: String? = nil,
         firstMediaPath: String? = nil,
-        imageURL: URL? = nil
+        imageURL: URL? = nil,
+        likesCount: Int = 0,
+        commentsCount: Int = 0,
+        hasLiked: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -292,6 +298,9 @@ struct LiveSnap: Identifiable, Equatable {
         self.attachedEventID = attachedEventID
         self.firstMediaPath = firstMediaPath
         self.imageURL = imageURL
+        self.likesCount = likesCount
+        self.commentsCount = commentsCount
+        self.hasLiked = hasLiked
     }
 
     static func == (lhs: LiveSnap, rhs: LiveSnap) -> Bool {

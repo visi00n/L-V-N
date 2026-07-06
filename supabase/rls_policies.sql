@@ -176,3 +176,43 @@ on public.device_tokens for all
 to authenticated
 using (user_id = (select auth.uid()))
 with check (user_id = (select auth.uid()));
+
+create policy "snap likes readable"
+on public.snap_likes for select
+to authenticated
+using (
+  exists (
+    select 1 from public.snaps s
+    where s.id = snap_likes.snap_id
+  )
+);
+
+create policy "users create own snap likes"
+on public.snap_likes for insert
+to authenticated
+with check (user_id = (select auth.uid()));
+
+create policy "users delete own snap likes"
+on public.snap_likes for delete
+to authenticated
+using (user_id = (select auth.uid()));
+
+create policy "snap comments readable"
+on public.snap_comments for select
+to authenticated
+using (
+  exists (
+    select 1 from public.snaps s
+    where s.id = snap_comments.snap_id
+  )
+);
+
+create policy "users create own snap comments"
+on public.snap_comments for insert
+to authenticated
+with check (user_id = (select auth.uid()));
+
+create policy "users delete own snap comments"
+on public.snap_comments for delete
+to authenticated
+using (user_id = (select auth.uid()));

@@ -148,6 +148,72 @@ struct SnapMediaInsert: Encodable {
     }
 }
 
+struct SnapLike: Codable, Identifiable, Equatable {
+    let id: UUID
+    let snapID: UUID
+    let userID: UUID
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case snapID = "snap_id"
+        case userID = "user_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct SnapLikeInsert: Encodable {
+    let snapID: UUID
+    let userID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case snapID = "snap_id"
+        case userID = "user_id"
+    }
+}
+
+struct SnapComment: Codable, Identifiable, Equatable {
+    let id: UUID
+    let snapID: UUID
+    let userID: UUID
+    let body: String
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case snapID = "snap_id"
+        case userID = "user_id"
+        case body
+        case createdAt = "created_at"
+    }
+}
+
+struct SnapCommentInsert: Encodable {
+    let snapID: UUID
+    let userID: UUID
+    let body: String
+
+    enum CodingKeys: String, CodingKey {
+        case snapID = "snap_id"
+        case userID = "user_id"
+        case body
+    }
+}
+
+struct SnapWithStats: Codable {
+    let snap: Snap
+    let likesCount: Int
+    let commentsCount: Int
+    let hasLiked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case snap
+        case likesCount = "likes_count"
+        case commentsCount = "comments_count"
+        case hasLiked = "has_liked"
+    }
+}
+
 struct Event: Codable, Identifiable, Equatable {
     let id: UUID
     let hostID: UUID
@@ -499,6 +565,16 @@ extension Snap {
         let palettes: [SnapPalette] = [.coral, .mint, .lavender, .sky, .lemon]
         let value = id.uuidString.utf8.reduce(0) { Int($0) + Int($1) }
         return palettes[value % palettes.count]
+    }
+}
+
+extension SnapWithStats {
+    func liveSnap(profile: Profile?, imageURL: URL?) -> LiveSnap {
+        var result = snap.liveSnap(profile: profile, imageURL: imageURL)
+        result.likesCount = likesCount
+        result.commentsCount = commentsCount
+        result.hasLiked = hasLiked
+        return result
     }
 }
 

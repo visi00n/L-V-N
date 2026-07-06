@@ -22,12 +22,11 @@ final class SnapService {
     private let bucketID = "snap-media"
 
     func fetchPublicSnaps() async throws -> [LiveSnap] {
-        let snapResponse: PostgrestResponse<[Snap]> = try await supabase
-            .from("snaps")
-            .select()
-            .eq("is_public", value: true)
-            .order("created_at", ascending: false)
-            .limit(100)
+        let session = try await supabase.auth.session
+        let userID = session.user.id
+
+        let snapResponse: PostgrestResponse<[SnapWithStats]> = try await supabase
+            .rpc("get_public_snaps_with_stats", params: ["p_user_id": userID.uuidString])
             .execute()
 
         let profileResponse: PostgrestResponse<[Profile]> = try await supabase
@@ -38,9 +37,9 @@ final class SnapService {
         let profilesByID = Dictionary(uniqueKeysWithValues: profileResponse.value.map { ($0.id, $0) })
 
         var liveSnaps: [LiveSnap] = []
-        for snap in snapResponse.value {
-            let signedURL = try? await signedURL(for: snap.firstMediaPath)
-            liveSnaps.append(snap.liveSnap(profile: profilesByID[snap.creatorID], imageURL: signedURL))
+        for statSnap in snapResponse.value {
+            let signedURL = try? await signedURL(for: statSnap.snap.firstMediaPath)
+            liveSnaps.append(statSnap.liveSnap(profile: profilesByID[statSnap.snap.creatorID], imageURL: signedURL))
         }
 
         return liveSnaps
@@ -116,6 +115,64 @@ final class SnapService {
         try await supabase.storage
             .from(bucketID)
             .createSignedURL(path: path, expiresIn: 60 * 60)
+    }
+
+    func toggleLike(snapID: String, isLiked: Bool) async throws {
+        let session = try await supabase.auth.session
+        let userID = session.user.id
+
+        if isLiked {
+            try await supabase
+                .from("snap_likes")
+                .insert(["snap_id": snapID, "user_id": userID.uuidString])
+                .execute()
+        } else {
+            try await supabase
+                .from("snap_likes")
+                .delete()
+                .eq("snap_id", value: snapID)
+                .eq("user_id", value: userID.uuidString)
+                .execute()
+        }
+    }
+
+    func fetchComments(snapID: String) async throws -> [(SnapComment, Profile?)] {
+        let response: PostgrestResponse<[SnapComment]> = try await supabase
+            .from("snap_comments")
+            .select()
+            .eq("snap_id", value: snapID)
+            .order("created_at", ascending: true)
+            .execute()
+
+        let profileIDs = Array(Set(response.value.map(\.userID)))
+        var profilesByID: [UUID: Profile] = [:]
+
+        if !profileIDs.isEmpty {
+            let profileResponse: PostgrestResponse<[Profile]> = try await supabase
+                .from("profiles")
+                .select()
+                .in("id", values: profileIDs.map(\.uuidString))
+                .execute()
+            profilesByID = Dictionary(uniqueKeysWithValues: profileResponse.value.map { ($0.id, $0) })
+        }
+
+        return response.value.map { ($0, profilesByID[$0.userID]) }
+    }
+
+    func postComment(snapID: String, body: String) async throws {
+        let session = try await supabase.auth.session
+        let userID = session.user.id
+
+        let insert = SnapCommentInsert(
+            snapID: UUID(uuidString: snapID)!,
+            userID: userID,
+            body: body
+        )
+
+        try await supabase
+            .from("snap_comments")
+            .insert(insert)
+            .execute()
     }
 }
 

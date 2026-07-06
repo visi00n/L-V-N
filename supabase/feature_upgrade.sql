@@ -251,3 +251,103 @@ from pg_policies
 where schemaname = 'public'
   and tablename in ('direct_conversations', 'direct_conversation_members', 'direct_messages')
 order by tablename, policyname;
+
+-- Snap Likes and Comments
+create table if not exists public.snap_likes (
+  id uuid primary key default gen_random_uuid(),
+  snap_id uuid not null references public.snaps(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (snap_id, user_id)
+);
+
+create table if not exists public.snap_comments (
+  id uuid primary key default gen_random_uuid(),
+  snap_id uuid not null references public.snaps(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists snap_likes_snap_id_idx on public.snap_likes(snap_id);
+create index if not exists snap_likes_user_id_idx on public.snap_likes(user_id);
+create index if not exists snap_comments_snap_id_created_at_idx on public.snap_comments(snap_id, created_at);
+
+alter table public.snap_likes enable row level security;
+alter table public.snap_comments enable row level security;
+
+create policy "snap likes readable"
+on public.snap_likes for select
+to authenticated
+using (
+  exists (
+    select 1 from public.snaps s
+    where s.id = snap_likes.snap_id
+  )
+);
+
+create policy "users create own snap likes"
+on public.snap_likes for insert
+to authenticated
+with check (user_id = (select auth.uid()));
+
+create policy "users delete own snap likes"
+on public.snap_likes for delete
+to authenticated
+using (user_id = (select auth.uid()));
+
+create policy "snap comments readable"
+on public.snap_comments for select
+to authenticated
+using (
+  exists (
+    select 1 from public.snaps s
+    where s.id = snap_comments.snap_id
+  )
+);
+
+create policy "users create own snap comments"
+on public.snap_comments for insert
+to authenticated
+with check (user_id = (select auth.uid()));
+
+create policy "users delete own snap comments"
+on public.snap_comments for delete
+to authenticated
+using (user_id = (select auth.uid()));
+
+create or replace function get_snap_stats(p_snap_id uuid, p_user_id uuid)
+returns jsonb as $$
+declare
+  v_likes_count int;
+  v_comments_count int;
+  v_has_liked boolean;
+begin
+  select count(*) into v_likes_count from public.snap_likes where snap_id = p_snap_id;
+  select count(*) into v_comments_count from public.snap_comments where snap_id = p_snap_id;
+  select exists(select 1 from public.snap_likes where snap_id = p_snap_id and user_id = p_user_id) into v_has_liked;
+
+  return jsonb_build_object(
+    'likes_count', v_likes_count,
+    'comments_count', v_comments_count,
+    'has_liked', v_has_liked
+  );
+end;
+$$ language plpgsql security definer;
+
+create or replace function get_public_snaps_with_stats(p_user_id uuid)
+returns setof jsonb as $$
+begin
+  return query
+  select jsonb_build_object(
+    'snap', to_jsonb(s),
+    'likes_count', (select count(*) from public.snap_likes sl where sl.snap_id = s.id),
+    'comments_count', (select count(*) from public.snap_comments sc where sc.snap_id = s.id),
+    'has_liked', exists(select 1 from public.snap_likes sl where sl.snap_id = s.id and sl.user_id = p_user_id)
+  )
+  from public.snaps s
+  where s.is_public = true
+  order by s.created_at desc
+  limit 100;
+end;
+$$ language plpgsql security definer;
