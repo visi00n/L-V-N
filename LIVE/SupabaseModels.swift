@@ -7,6 +7,8 @@
 
 import CoreLocation
 import Foundation
+import Supabase
+import Storage
 
 struct Profile: Codable, Identifiable, Equatable {
     let id: UUID
@@ -53,12 +55,14 @@ struct ProfileUpdate: Encodable {
     let displayName: String
     let bio: String
     let isPrivate: Bool
+    let avatarURL: String?
 
     enum CodingKeys: String, CodingKey {
         case username
         case displayName = "display_name"
         case bio
         case isPrivate = "is_private"
+        case avatarURL = "avatar_url"
     }
 }
 
@@ -230,6 +234,9 @@ struct Event: Codable, Identifiable, Equatable {
     let capacity: Int?
     let createdAt: Date
     let updatedAt: Date
+    let coverImagePath: String?
+    let isPublic: Bool?
+    let inviteToken: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -247,6 +254,9 @@ struct Event: Codable, Identifiable, Equatable {
         case capacity
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case coverImagePath = "cover_image_path"
+        case isPublic = "is_public"
+        case inviteToken = "invite_token"
     }
 }
 
@@ -263,6 +273,9 @@ struct EventInsert: Encodable {
     let isPaid: Bool
     let priceCents: Int?
     let capacity: Int?
+    let coverImagePath: String?
+    let isPublic: Bool
+    let inviteToken: String?
 
     enum CodingKeys: String, CodingKey {
         case hostID = "host_id"
@@ -277,6 +290,9 @@ struct EventInsert: Encodable {
         case isPaid = "is_paid"
         case priceCents = "price_cents"
         case capacity
+        case coverImagePath = "cover_image_path"
+        case isPublic = "is_public"
+        case inviteToken = "invite_token"
     }
 }
 
@@ -466,6 +482,7 @@ extension Profile {
             displayName: displayName,
             bio: bio ?? "",
             avatarSymbolName: "person.fill",
+            avatarURL: avatarURL.flatMap(URL.init(string:)),
             ventureScore: 0,
             streak: 0,
             followers: 0,
@@ -493,6 +510,13 @@ extension Event {
             following: 0
         )
 
+        let imageURL: URL?
+        if let path = coverImagePath, !path.isEmpty {
+            imageURL = try? supabase.storage.from("event-covers").getPublicURL(path: path)
+        } else {
+            imageURL = nil
+        }
+
         return LiveEvent(
             id: id.uuidString,
             title: title,
@@ -510,7 +534,10 @@ extension Event {
             hostID: hostID.uuidString,
             startsAt: startsAt,
             endsAt: endsAt,
-            capacity: capacity
+            capacity: capacity,
+            coverImageURL: imageURL,
+            isPublic: isPublic ?? true,
+            inviteToken: inviteToken
         )
     }
 

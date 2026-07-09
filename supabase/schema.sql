@@ -36,6 +36,8 @@ create table if not exists public.events (
   price_cents integer,
   capacity integer,
   cover_image_path text,
+  is_public boolean not null default true,
+  invite_token text,
   color_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -133,6 +135,11 @@ create index if not exists follows_following_id_idx on public.follows(following_
 create index if not exists follows_status_idx on public.follows(status);
 create index if not exists events_host_id_idx on public.events(host_id);
 create index if not exists events_starts_at_idx on public.events(starts_at);
+create unique index if not exists events_invite_token_key on public.events(invite_token) where invite_token is not null;
+create index if not exists events_visibility_starts_idx on public.events(is_public, starts_at desc);
+create index if not exists events_ends_at_idx on public.events(ends_at);
+create index if not exists events_created_at_idx on public.events(created_at desc);
+create index if not exists events_location_idx on public.events(latitude, longitude);
 create index if not exists event_members_user_id_idx on public.event_members(user_id);
 create index if not exists event_messages_event_id_created_at_idx on public.event_messages(event_id, created_at);
 create index if not exists event_messages_sender_id_idx on public.event_messages(sender_id);

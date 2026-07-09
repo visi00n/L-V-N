@@ -26,12 +26,13 @@ final class ProfileService {
         return response.value
     }
 
-    func updateProfile(userID: UUID, username: String, displayName: String, bio: String, isPrivate: Bool) async throws -> Profile {
+    func updateProfile(userID: UUID, username: String, displayName: String, bio: String, isPrivate: Bool, avatarURL: String?) async throws -> Profile {
         let update = ProfileUpdate(
             username: username.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "@", with: "").lowercased(),
             displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines),
-            isPrivate: isPrivate
+            isPrivate: isPrivate,
+            avatarURL: avatarURL
         )
 
         let response: PostgrestResponse<[Profile]>

@@ -8,7 +8,9 @@
 import Combine
 import CoreLocation
 import Foundation
+import UIKit
 import Supabase
+import SwiftUI
 
 struct EventDraft {
     let title: String
@@ -19,6 +21,8 @@ struct EventDraft {
     let locationName: String
     let coordinate: CLLocationCoordinate2D
     let capacity: Int?
+    let image: UIImage?
+    let isPublic: Bool
 }
 
 final class EventService {
@@ -26,7 +30,7 @@ final class EventService {
         let eventResponse: PostgrestResponse<[Event]> = try await supabase
             .from("events")
             .select()
-            .order("starts_at", ascending: true)
+            .order("created_at", ascending: false)
             .limit(100)
             .execute()
 
@@ -60,6 +64,24 @@ final class EventService {
     }
 
     func createEvent(draft: EventDraft, hostProfile: Profile) async throws -> LiveEvent {
+        var storagePath: String? = nil
+
+        if let image = draft.image, let jpegData = image.liveCompressedJPEGData(maxPixelDimension: 1800, compressionQuality: 0.7) {
+            let path = "\(hostProfile.id.uuidString.lowercased())/\(UUID().uuidString.lowercased()).jpg"
+            try await supabase.storage
+                .from("event-covers")
+                .upload(
+                    path,
+                    data: jpegData,
+                    options: FileOptions(
+                        cacheControl: "3600",
+                        contentType: "image/jpeg",
+                        upsert: false
+                    )
+                )
+            storagePath = path
+        }
+
         let insert = EventInsert(
             hostID: hostProfile.id,
             title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -72,7 +94,10 @@ final class EventService {
             longitude: draft.coordinate.longitude,
             isPaid: false,
             priceCents: nil,
-            capacity: draft.capacity
+            capacity: draft.capacity,
+            coverImagePath: storagePath,
+            isPublic: draft.isPublic,
+            inviteToken: draft.isPublic ? nil : UUID().uuidString.lowercased()
         )
 
         guard !insert.title.isEmpty else {
@@ -153,7 +178,10 @@ final class EventViewModel: ObservableObject {
             let localOnly = LiveData.events.filter { local in
                 !loaded.0.contains { $0.id == local.id }
             }
-            events = (loaded.0 + localOnly).prefix(100).map { $0 }
+            let localEvents = (loaded.0 + localOnly).prefix(100).map { $0 }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                events = localEvents
+            }
             joinedEventIDs.formUnion(loaded.1)
         } catch {
             errorMessage = "Events are showing from the local preview until Supabase is ready."

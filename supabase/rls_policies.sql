@@ -41,7 +41,16 @@ using (follower_id = (select auth.uid()));
 create policy "events readable"
 on public.events for select
 to authenticated
-using (true);
+using (
+  is_public = true
+  or host_id = (select auth.uid())
+  or exists (
+    select 1
+    from public.event_members em
+    where em.event_id = events.id
+      and em.user_id = (select auth.uid())
+  )
+);
 
 create policy "users create events"
 on public.events for insert

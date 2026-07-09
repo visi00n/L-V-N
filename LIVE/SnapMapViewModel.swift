@@ -101,7 +101,7 @@ final class SnapMapViewModel: ObservableObject {
         realtimeTask = nil
     }
 
-    private func upsert(_ snap: LiveSnap) {
+    func upsert(_ snap: LiveSnap) {
         snaps.removeAll { $0.id == snap.id }
         snaps.insert(snap, at: 0)
     }

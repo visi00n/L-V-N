@@ -25,8 +25,11 @@ final class SnapService {
         let session = try await supabase.auth.session
         let userID = session.user.id
 
-        let snapResponse: PostgrestResponse<[SnapWithStats]> = try await supabase
-            .rpc("get_public_snaps_with_stats", params: ["p_user_id": userID.uuidString])
+        let snapResponse: PostgrestResponse<[Snap]> = try await supabase
+            .from("snaps")
+            .select()
+            .order("created_at", ascending: false)
+            .limit(250)
             .execute()
 
         let profileResponse: PostgrestResponse<[Profile]> = try await supabase
@@ -35,14 +38,45 @@ final class SnapService {
             .execute()
 
         let profilesByID = Dictionary(uniqueKeysWithValues: profileResponse.value.map { ($0.id, $0) })
+        let snapIDs = snapResponse.value.map(\.id)
+        let snapIDSet = Set(snapIDs)
+        let likes = (try? await fetchLikes(for: snapIDs)) ?? []
+        let comments = (try? await fetchCommentCounts(for: snapIDs)) ?? [:]
+        let likesBySnapID = Dictionary(grouping: likes, by: \.snapID)
 
         var liveSnaps: [LiveSnap] = []
-        for statSnap in snapResponse.value {
-            let signedURL = try? await signedURL(for: statSnap.snap.firstMediaPath)
-            liveSnaps.append(statSnap.liveSnap(profile: profilesByID[statSnap.snap.creatorID], imageURL: signedURL))
+        for snap in snapResponse.value where snapIDSet.contains(snap.id) {
+            let signedURL = try? await signedURL(for: snap.firstMediaPath)
+            var liveSnap = snap.liveSnap(profile: profilesByID[snap.creatorID], imageURL: signedURL)
+            let snapLikes = likesBySnapID[snap.id, default: []]
+            liveSnap.likesCount = snapLikes.count
+            liveSnap.commentsCount = comments[snap.id, default: 0]
+            liveSnap.hasLiked = snapLikes.contains { $0.userID == userID }
+            liveSnaps.append(liveSnap)
         }
 
         return liveSnaps
+    }
+
+    private func fetchLikes(for snapIDs: [UUID]) async throws -> [SnapLike] {
+        guard !snapIDs.isEmpty else { return [] }
+        let response: PostgrestResponse<[SnapLike]> = try await supabase
+            .from("snap_likes")
+            .select()
+            .in("snap_id", values: snapIDs.map(\.uuidString))
+            .execute()
+        return response.value
+    }
+
+    private func fetchCommentCounts(for snapIDs: [UUID]) async throws -> [UUID: Int] {
+        guard !snapIDs.isEmpty else { return [:] }
+        let response: PostgrestResponse<[SnapComment]> = try await supabase
+            .from("snap_comments")
+            .select()
+            .in("snap_id", values: snapIDs.map(\.uuidString))
+            .execute()
+        return Dictionary(grouping: response.value, by: \.snapID)
+            .mapValues(\.count)
     }
 
     func createSnap(draft: SnapDraft, currentProfile: Profile?) async throws -> LiveSnap {
@@ -57,7 +91,7 @@ final class SnapService {
         guard !cleanLocation.isEmpty else {
             throw SnapServiceError.message("Missing location name.")
         }
-        guard let jpegData = draft.image.jpegData(compressionQuality: 0.78) else {
+        guard let jpegData = draft.image.liveCompressedJPEGData(maxPixelDimension: 1600, compressionQuality: 0.64) else {
             throw SnapServiceError.message("Could not compress this photo.")
         }
 
@@ -122,9 +156,13 @@ final class SnapService {
         let userID = session.user.id
 
         if isLiked {
+            let insert = SnapLikeInsert(
+                snapID: UUID(uuidString: snapID)!,
+                userID: userID
+            )
             try await supabase
                 .from("snap_likes")
-                .insert(["snap_id": snapID, "user_id": userID.uuidString])
+                .insert(insert)
                 .execute()
         } else {
             try await supabase
