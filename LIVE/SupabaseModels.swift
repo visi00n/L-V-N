@@ -476,7 +476,9 @@ extension Profile {
     }
 
     var explorer: Explorer {
-        Explorer(
+        let ig = UserDefaults.standard.string(forKey: "live_ig_\(id.uuidString)")
+        let tt = UserDefaults.standard.string(forKey: "live_tt_\(id.uuidString)")
+        return Explorer(
             id: id.uuidString,
             handle: handle,
             displayName: displayName,
@@ -486,7 +488,9 @@ extension Profile {
             ventureScore: 0,
             streak: 0,
             followers: 0,
-            following: 0
+            following: 0,
+            instagramHandle: ig,
+            tiktokHandle: tt
         )
     }
 }

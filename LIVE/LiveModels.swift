@@ -261,7 +261,7 @@ enum EventRadius: String, CaseIterable, Identifiable {
     case twentyFive = "25 mi"
     case fifty = "50 mi"
     case hundred = "100 mi"
-    case anywhere = "Anywhere"
+    case anywhere = "Global"
 
     var id: String { rawValue }
 
@@ -285,6 +285,7 @@ enum EventRadius: String, CaseIterable, Identifiable {
 
 enum MapMode: String, CaseIterable, Identifiable {
     case `public` = "Public"
+    case friends = "Friends"
     case personal = "Personal"
 
     var id: String { rawValue }
@@ -301,6 +302,8 @@ struct Explorer: Identifiable, Equatable {
     let streak: Int
     let followers: Int
     let following: Int
+    var instagramHandle: String? = nil
+    var tiktokHandle: String? = nil
 
     init(
         id: String,
@@ -312,7 +315,9 @@ struct Explorer: Identifiable, Equatable {
         ventureScore: Int,
         streak: Int,
         followers: Int,
-        following: Int
+        following: Int,
+        instagramHandle: String? = nil,
+        tiktokHandle: String? = nil
     ) {
         self.id = id
         self.handle = handle
@@ -324,6 +329,8 @@ struct Explorer: Identifiable, Equatable {
         self.streak = streak
         self.followers = followers
         self.following = following
+        self.instagramHandle = instagramHandle
+        self.tiktokHandle = tiktokHandle
     }
 }
 

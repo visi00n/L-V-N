@@ -80,8 +80,13 @@ final class SnapService {
     }
 
     func createSnap(draft: SnapDraft, currentProfile: Profile?) async throws -> LiveSnap {
-        let session = try await supabase.auth.session
-        let userID = session.user.id
+        let userID: UUID
+        if let currentProfile {
+            userID = currentProfile.id
+        } else {
+            let session = try await supabase.auth.session
+            userID = session.user.id
+        }
         let cleanCaption = draft.caption.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanLocation = draft.locationName.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -211,6 +216,28 @@ final class SnapService {
             .from("snap_comments")
             .insert(insert)
             .execute()
+    }
+
+    func deleteSnap(snapID: UUID) async throws {
+        let existing: PostgrestResponse<[Snap]> = try await supabase
+            .from("snaps")
+            .select()
+            .eq("id", value: snapID)
+            .limit(1)
+            .execute()
+        let storagePath = existing.value.first?.firstMediaPath
+
+        try await supabase
+            .from("snaps")
+            .delete()
+            .eq("id", value: snapID)
+            .execute()
+
+        if let storagePath {
+            _ = try? await supabase.storage
+                .from(bucketID)
+                .remove(paths: [storagePath])
+        }
     }
 }
 

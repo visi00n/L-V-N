@@ -12,6 +12,7 @@ struct ProfileSocialState: Equatable {
     var followerCount: Int
     var followingCount: Int
     var isFollowing: Bool
+    var isFriend: Bool = false
 }
 
 final class ProfileService {
@@ -73,14 +74,18 @@ final class ProfileService {
             .execute()
 
         var isFollowing = false
+        var isFriend = false
         if let currentUserID {
             isFollowing = followers.value.contains { $0.followerID == currentUserID && $0.status == "approved" }
+            let targetFollowsCurrentUser = following.value.contains { $0.followingID == currentUserID && $0.status == "approved" }
+            isFriend = isFollowing && targetFollowsCurrentUser
         }
 
         return ProfileSocialState(
             followerCount: followers.value.count,
             followingCount: following.value.count,
-            isFollowing: isFollowing
+            isFollowing: isFollowing,
+            isFriend: isFriend
         )
     }
 
@@ -90,6 +95,13 @@ final class ProfileService {
 
     func following(of userID: UUID) async throws -> [Profile] {
         try await socialProfiles(for: userID, showingFollowers: false)
+    }
+
+    func fetchFriends(of userID: UUID) async throws -> [Profile] {
+        let followingProfiles = try await following(of: userID)
+        let followerProfiles = try await followers(of: userID)
+        let followerIDs = Set(followerProfiles.map { $0.id })
+        return followingProfiles.filter { followerIDs.contains($0.id) }
     }
 
     func follow(currentUserID: UUID, targetUserID: UUID) async throws {

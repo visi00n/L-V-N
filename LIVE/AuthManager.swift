@@ -15,15 +15,16 @@ final class AuthManager: ObservableObject {
     @Published private(set) var profile: Profile?
     @Published private(set) var isLoading = true
     @Published var errorMessage: String?
+    @Published var appleSuggestedDisplayName: String?
 
     private var authStateTask: Task<Void, Never>?
 
     var isSignedIn: Bool {
-        session != nil
+        session != nil || profile != nil
     }
 
     var currentUserID: UUID? {
-        session?.user.id
+        session?.user.id ?? profile?.id
     }
 
     func start() {
@@ -68,11 +69,13 @@ final class AuthManager: ObservableObject {
             }
 
             session = newSession
-            profile = try await createProfile(
+            let newProfile = try await createProfile(
                 userID: newSession.user.id,
                 username: cleanUsername,
                 displayName: cleanDisplayName
             )
+            profile = newProfile
+            saveProfileToCache(newProfile)
         }
     }
 
@@ -83,8 +86,42 @@ final class AuthManager: ObservableObject {
                 password: password
             )
             session = newSession
-            profile = try await fetchProfile(userID: newSession.user.id)
+            if let fetched = try await fetchProfile(userID: newSession.user.id) {
+                profile = fetched
+                saveProfileToCache(fetched)
+            }
         }
+    }
+
+    func loginWithApple(idToken: String, nonce: String, displayName: String?) async {
+        await performAuthAction {
+            let cleanDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let cleanDisplayName, !cleanDisplayName.isEmpty {
+                appleSuggestedDisplayName = cleanDisplayName
+                UserDefaults.standard.set(cleanDisplayName, forKey: "live_apple_suggested_display_name")
+            }
+
+            let newSession = try await supabase.auth.signInWithIdToken(
+                credentials: OpenIDConnectCredentials(
+                    provider: .apple,
+                    idToken: idToken,
+                    nonce: nonce
+                )
+            )
+
+            session = newSession
+            if let fetched = try await fetchProfile(userID: newSession.user.id) {
+                profile = fetched
+                saveProfileToCache(fetched)
+            } else {
+                profile = nil
+            }
+        }
+    }
+
+    func setAuthError(_ message: String) {
+        errorMessage = message
+        isLoading = false
     }
 
     func logout() async {
@@ -92,6 +129,8 @@ final class AuthManager: ObservableObject {
             try await supabase.auth.signOut()
             session = nil
             profile = nil
+            appleSuggestedDisplayName = nil
+            UserDefaults.standard.removeObject(forKey: "live_cached_profile")
         }
     }
 
@@ -110,19 +149,35 @@ final class AuthManager: ObservableObject {
                 throw AuthManagerError.message("Display name is required.")
             }
 
-            profile = try await createProfile(
-                userID: userID,
-                username: cleanUsername,
-                displayName: cleanDisplayName
-            )
+            let newProfile: Profile
+            do {
+                newProfile = try await createProfile(
+                    userID: userID,
+                    username: cleanUsername,
+                    displayName: cleanDisplayName
+                )
+            } catch {
+                if Self.isDuplicateUsernameError(error) {
+                    throw AuthManagerError.message("That username is already taken. Try another handle.")
+                }
+                throw error
+            }
+            profile = newProfile
+            saveProfileToCache(newProfile)
         }
     }
 
     func refreshProfile() async {
         guard let userID = currentUserID else { return }
         do {
-            profile = try await fetchProfile(userID: userID)
+            if let fetched = try await fetchProfile(userID: userID) {
+                profile = fetched
+                saveProfileToCache(fetched)
+            }
         } catch {
+            if profile == nil {
+                profile = loadProfileFromCache()
+            }
             errorMessage = Self.message(for: error)
         }
     }
@@ -137,14 +192,43 @@ final class AuthManager: ObservableObject {
         }
 
         do {
-            profile = try await fetchProfile(userID: userID)
+            if let fetched = try await fetchProfile(userID: userID) {
+                profile = fetched
+                saveProfileToCache(fetched)
+            } else if let cached = loadProfileFromCache(), cached.id == userID {
+                profile = cached
+            } else {
+                profile = nil
+            }
             errorMessage = nil
         } catch {
-            profile = nil
-            errorMessage = error.localizedDescription
+            if let cached = loadProfileFromCache(), cached.id == userID {
+                profile = cached
+                errorMessage = nil
+            } else {
+                profile = nil
+                errorMessage = error.localizedDescription
+            }
         }
 
         isLoading = false
+    }
+
+    private func saveProfileToCache(_ profile: Profile) {
+        if let data = try? JSONEncoder().encode(profile) {
+            UserDefaults.standard.set(data, forKey: "live_cached_profile")
+        }
+    }
+
+    private func loadProfileFromCache() -> Profile? {
+        if appleSuggestedDisplayName == nil {
+            appleSuggestedDisplayName = UserDefaults.standard.string(forKey: "live_apple_suggested_display_name")
+        }
+        if let data = UserDefaults.standard.data(forKey: "live_cached_profile"),
+           let cached = try? JSONDecoder().decode(Profile.self, from: data) {
+            return cached
+        }
+        return nil
     }
 
     private func performAuthAction(_ action: () async throws -> Void) async {
@@ -198,6 +282,13 @@ final class AuthManager: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "@", with: "")
             .lowercased()
+    }
+
+    private static func isDuplicateUsernameError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("profiles_username_key")
+            || (message.contains("duplicate key") && message.contains("username"))
+            || message.contains("already exists")
     }
 
     private static func message(for error: Error) -> String {

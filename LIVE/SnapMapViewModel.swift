@@ -106,6 +106,16 @@ final class SnapMapViewModel: ObservableObject {
         snaps.insert(snap, at: 0)
     }
 
+    func removeSnap(id: String) {
+        snaps.removeAll { $0.id == id }
+    }
+
+    func deleteSnap(snapID: String) async throws {
+        guard let uuid = UUID(uuidString: snapID) else { return }
+        try await snapService.deleteSnap(snapID: uuid)
+        snaps.removeAll { $0.id == snapID }
+    }
+
     private static func message(for error: Error) -> String {
         if let error = error as? LocalizedError, let description = error.errorDescription {
             return description

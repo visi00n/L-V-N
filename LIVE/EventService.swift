@@ -147,6 +147,14 @@ final class EventService {
             .eq("user_id", value: userID)
             .execute()
     }
+
+    func deleteEvent(eventID: UUID) async throws {
+        try await supabase
+            .from("events")
+            .delete()
+            .eq("id", value: eventID)
+            .execute()
+    }
 }
 
 @MainActor
@@ -195,6 +203,14 @@ final class EventViewModel: ObservableObject {
         upsert(event)
         joinedEventIDs.insert(event.id)
         return event
+    }
+
+    func deleteEvent(eventID: String) async throws {
+        guard let uuid = UUID(uuidString: eventID) else { return }
+        try await eventService.deleteEvent(eventID: uuid)
+        withAnimation {
+            events.removeAll { $0.id == eventID }
+        }
     }
 
     func toggleJoin(_ event: LiveEvent, currentUserID: UUID?) async {

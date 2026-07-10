@@ -63,6 +63,11 @@ to authenticated
 using (host_id = (select auth.uid()))
 with check (host_id = (select auth.uid()));
 
+create policy "hosts delete own events"
+on public.events for delete
+to authenticated
+using (host_id = (select auth.uid()));
+
 create policy "event members readable"
 on public.event_members for select
 to authenticated

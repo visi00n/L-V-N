@@ -30,6 +30,7 @@ drop policy if exists "events readable" on public.events;
 drop policy if exists "public or member events readable" on public.events;
 drop policy if exists "users create events" on public.events;
 drop policy if exists "hosts update own events" on public.events;
+drop policy if exists "hosts delete own events" on public.events;
 
 create policy "public or member events readable"
 on public.events for select
@@ -56,6 +57,11 @@ to authenticated
 using (host_id = (select auth.uid()))
 with check (host_id = (select auth.uid()));
 
-grant select, insert, update on public.events to authenticated;
+create policy "hosts delete own events"
+on public.events for delete
+to authenticated
+using (host_id = (select auth.uid()));
+
+grant select, insert, update, delete on public.events to authenticated;
 
 commit;
