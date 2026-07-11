@@ -2,6 +2,18 @@
 
 This folder contains starter Supabase Edge Functions for the first paid-ticket path. They are intentionally server-side only: Stripe secret keys, webhook secrets, service-role keys, and APNs keys must never ship in the iOS app.
 
+## SQL Setup Order
+
+Run these files in the Supabase SQL Editor for a fresh dev project:
+
+1. `schema.sql`
+2. `rpc_functions.sql`
+3. `rls_policies.sql`
+4. `storage_policies.sql`
+5. `realtime_tables.sql`
+
+The live dev project currently uses `snaps.user_id` and the `create_direct_conversation(target_user_id uuid)` RPC. Keep those names aligned with the Swift models.
+
 ## Functions
 
 - `create-ticket-checkout`: authenticated iOS client calls this to create a Stripe Checkout Session for a paid event.

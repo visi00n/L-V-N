@@ -57,16 +57,281 @@ enum EventPulse: Equatable {
     case steady
 }
 
+enum LiveEventCategory: String, CaseIterable, Identifiable {
+    case social = "Social"
+    case sports = "Sports"
+    case basketball = "Basketball"
+    case soccer = "Soccer"
+    case volleyball = "Volleyball"
+    case gym = "Gym"
+    case running = "Running"
+    case fitness = "Fitness"
+    case hiking = "Hiking"
+    case beach = "Beach"
+    case cliffJumping = "Cliff Jumping"
+    case bibleStudy = "Bible Study"
+    case church = "Church"
+    case study = "Study"
+    case food = "Food"
+    case coffee = "Coffee"
+    case nightlife = "Nightlife"
+    case music = "Music"
+    case art = "Art"
+    case photography = "Photography"
+    case travel = "Travel"
+    case volunteering = "Volunteering"
+    case carMeet = "Car Meet"
+    case motorcycleRide = "Motorcycle Ride"
+    case gaming = "Gaming"
+    case business = "Business"
+    case networking = "Networking"
+    case picnic = "Picnic"
+    case birthday = "Birthday"
+    case party = "Party"
+    case creator = "Creator"
+    case other = "Other"
+
+    var id: String { rawValue }
+
+    init(label: String) {
+        let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "sports", "games":
+            self = .sports
+        case "basketball":
+            self = .basketball
+        case "soccer":
+            self = .soccer
+        case "volleyball", "open venture":
+            self = .volleyball
+        case "gym":
+            self = .gym
+        case "running", "run":
+            self = .running
+        case "fitness", "wellness":
+            self = .fitness
+        case "hiking", "outdoors":
+            self = .hiking
+        case "beach":
+            self = .beach
+        case "cliff jumping", "cliffjumping":
+            self = .cliffJumping
+        case "bible study", "biblestudy":
+            self = .bibleStudy
+        case "church":
+            self = .church
+        case "study":
+            self = .study
+        case "food":
+            self = .food
+        case "coffee":
+            self = .coffee
+        case "nightlife":
+            self = .nightlife
+        case "music":
+            self = .music
+        case "art":
+            self = .art
+        case "photography", "photo", "photos":
+            self = .photography
+        case "travel":
+            self = .travel
+        case "volunteering", "volunteer", "community":
+            self = .volunteering
+        case "car meet", "carmeet":
+            self = .carMeet
+        case "motorcycle ride", "motorcycleride", "motorcycle":
+            self = .motorcycleRide
+        case "gaming":
+            self = .gaming
+        case "business":
+            self = .business
+        case "networking":
+            self = .networking
+        case "picnic":
+            self = .picnic
+        case "birthday":
+            self = .birthday
+        case "party":
+            self = .party
+        case "creator", "creative", "style", "culture":
+            self = .creator
+        case "social":
+            self = .social
+        default:
+            self = .other
+        }
+    }
+
+    var palette: SnapPalette {
+        switch self {
+        case .social, .creator, .art, .photography, .birthday, .party:
+            .lavender
+        case .sports, .basketball, .soccer, .volleyball, .nightlife, .carMeet, .motorcycleRide:
+            .coral
+        case .fitness, .gym, .running, .hiking, .beach, .cliffJumping, .volunteering:
+            .mint
+        case .food, .coffee, .study, .church, .bibleStudy, .picnic:
+            .lemon
+        case .music, .travel, .gaming, .business, .networking, .other:
+            .sky
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .social:
+            "person.2.fill"
+        case .sports, .basketball, .volleyball:
+            "sportscourt.fill"
+        case .soccer:
+            "soccerball"
+        case .fitness, .gym:
+            "dumbbell.fill"
+        case .running:
+            "figure.run"
+        case .hiking:
+            "figure.hiking"
+        case .beach:
+            "beach.umbrella.fill"
+        case .cliffJumping:
+            "water.waves"
+        case .bibleStudy:
+            "book.closed.fill"
+        case .church:
+            "building.columns.fill"
+        case .study:
+            "book.fill"
+        case .food:
+            "fork.knife"
+        case .coffee:
+            "cup.and.saucer.fill"
+        case .nightlife, .party, .birthday:
+            "sparkles"
+        case .music:
+            "music.note"
+        case .art:
+            "paintpalette.fill"
+        case .photography, .creator:
+            "camera.fill"
+        case .travel:
+            "map.fill"
+        case .volunteering:
+            "hands.sparkles.fill"
+        case .carMeet:
+            "car.fill"
+        case .motorcycleRide:
+            "motorcycle.fill"
+        case .gaming:
+            "gamecontroller.fill"
+        case .business, .networking:
+            "briefcase.fill"
+        case .picnic:
+            "basket.fill"
+        case .other:
+            "sparkles"
+        }
+    }
+
+    var descriptionPrompt: String {
+        switch self {
+        case .hiking:
+            "Trail difficulty, what to bring, parking, safety notes…"
+        case .bibleStudy, .church:
+            "Topic, what to bring, group size, location notes…"
+        case .sports, .basketball, .soccer, .volleyball, .gym, .running, .fitness:
+            "Skill level, equipment, teams, rules…"
+        case .food, .coffee:
+            "Vibe, price, reservation, what to expect…"
+        case .beach, .cliffJumping:
+            "Meeting point, safety notes, weather, what to bring…"
+        case .nightlife, .music, .party, .birthday:
+            "Vibe, dress code, age rules, cover, what to expect…"
+        case .business, .networking:
+            "Who should come, agenda, format, what to bring…"
+        default:
+            "What to bring, who it’s for, vibe, parking, what to expect…"
+        }
+    }
+}
+
+enum EventRadius: String, CaseIterable, Identifiable {
+    case five = "5 mi"
+    case ten = "10 mi"
+    case twentyFive = "25 mi"
+    case fifty = "50 mi"
+    case hundred = "100 mi"
+    case anywhere = "Global"
+
+    var id: String { rawValue }
+
+    var miles: Double? {
+        switch self {
+        case .five:
+            5
+        case .ten:
+            10
+        case .twentyFive:
+            25
+        case .fifty:
+            50
+        case .hundred:
+            100
+        case .anywhere:
+            nil
+        }
+    }
+}
+
+enum MapMode: String, CaseIterable, Identifiable {
+    case `public` = "Public"
+    case friends = "Friends"
+    case personal = "Personal"
+
+    var id: String { rawValue }
+}
+
 struct Explorer: Identifiable, Equatable {
     let id: String
     let handle: String
     let displayName: String
     let bio: String
     let avatarSymbolName: String
+    let avatarURL: URL?
     let ventureScore: Int
     let streak: Int
     let followers: Int
     let following: Int
+    var instagramHandle: String? = nil
+    var tiktokHandle: String? = nil
+
+    init(
+        id: String,
+        handle: String,
+        displayName: String,
+        bio: String,
+        avatarSymbolName: String,
+        avatarURL: URL? = nil,
+        ventureScore: Int,
+        streak: Int,
+        followers: Int,
+        following: Int,
+        instagramHandle: String? = nil,
+        tiktokHandle: String? = nil
+    ) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.bio = bio
+        self.avatarSymbolName = avatarSymbolName
+        self.avatarURL = avatarURL
+        self.ventureScore = ventureScore
+        self.streak = streak
+        self.followers = followers
+        self.following = following
+        self.instagramHandle = instagramHandle
+        self.tiktokHandle = tiktokHandle
+    }
 }
 
 struct LiveEvent: Identifiable, Equatable {
@@ -83,6 +348,57 @@ struct LiveEvent: Identifiable, Equatable {
     let palette: SnapPalette
     let isSignedUp: Bool
     let pulse: EventPulse
+    let hostID: String?
+    let startsAt: Date?
+    let endsAt: Date?
+    let capacity: Int?
+    let coverImageURL: URL?
+    let isPublic: Bool
+    let inviteToken: String?
+
+    init(
+        id: String,
+        title: String,
+        host: Explorer,
+        category: String,
+        locationName: String,
+        timeLabel: String,
+        attendeeCount: Int,
+        priceLabel: String,
+        details: String,
+        coordinate: CLLocationCoordinate2D,
+        palette: SnapPalette,
+        isSignedUp: Bool,
+        pulse: EventPulse,
+        hostID: String? = nil,
+        startsAt: Date? = nil,
+        endsAt: Date? = nil,
+        capacity: Int? = nil,
+        coverImageURL: URL? = nil,
+        isPublic: Bool = true,
+        inviteToken: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.host = host
+        self.category = category
+        self.locationName = locationName
+        self.timeLabel = timeLabel
+        self.attendeeCount = attendeeCount
+        self.priceLabel = priceLabel
+        self.details = details
+        self.coordinate = coordinate
+        self.palette = palette
+        self.isSignedUp = isSignedUp
+        self.pulse = pulse
+        self.hostID = hostID
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.capacity = capacity
+        self.coverImageURL = coverImageURL
+        self.isPublic = isPublic
+        self.inviteToken = inviteToken
+    }
 
     static func == (lhs: LiveEvent, rhs: LiveEvent) -> Bool {
         lhs.id == rhs.id
@@ -100,6 +416,45 @@ struct LiveSnap: Identifiable, Equatable {
     let imageCount: Int
     let palette: SnapPalette
     let attachedEventID: String?
+    let firstMediaPath: String?
+    let imageURL: URL?
+    var likesCount: Int
+    var commentsCount: Int
+    var hasLiked: Bool
+
+    init(
+        id: String,
+        title: String,
+        caption: String,
+        creator: Explorer,
+        locationName: String,
+        timeLabel: String,
+        coordinate: CLLocationCoordinate2D,
+        imageCount: Int,
+        palette: SnapPalette,
+        attachedEventID: String? = nil,
+        firstMediaPath: String? = nil,
+        imageURL: URL? = nil,
+        likesCount: Int = 0,
+        commentsCount: Int = 0,
+        hasLiked: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.caption = caption
+        self.creator = creator
+        self.locationName = locationName
+        self.timeLabel = timeLabel
+        self.coordinate = coordinate
+        self.imageCount = imageCount
+        self.palette = palette
+        self.attachedEventID = attachedEventID
+        self.firstMediaPath = firstMediaPath
+        self.imageURL = imageURL
+        self.likesCount = likesCount
+        self.commentsCount = commentsCount
+        self.hasLiked = hasLiked
+    }
 
     static func == (lhs: LiveSnap, rhs: LiveSnap) -> Bool {
         lhs.id == rhs.id
@@ -238,5 +593,14 @@ enum LiveData {
 
     static var signedUpEvents: [LiveEvent] {
         events.filter(\.isSignedUp)
+    }
+}
+
+extension LiveEvent {
+    func distanceMiles(from coordinate: CLLocationCoordinate2D?) -> Double? {
+        guard let coordinate else { return nil }
+        let start = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let end = CLLocation(latitude: self.coordinate.latitude, longitude: self.coordinate.longitude)
+        return start.distance(from: end) / 1_609.344
     }
 }

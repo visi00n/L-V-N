@@ -156,6 +156,29 @@ Supabase should be the first real backend because one service can cover:
 - Storage for snap photos
 - Edge Functions for secure server-side actions
 
+Current project-specific setup is tracked in:
+
+```text
+/Users/laptcv/Desktop/LIVE/docs/SUPABASE_SETUP.md
+```
+
+Run the actual SQL files from the repo, not older pasted chat snippets:
+
+```text
+/Users/laptcv/Desktop/LIVE/supabase/schema.sql
+/Users/laptcv/Desktop/LIVE/supabase/rls_policies.sql
+/Users/laptcv/Desktop/LIVE/supabase/storage_policies.sql
+/Users/laptcv/Desktop/LIVE/supabase/realtime_tables.sql
+```
+
+The active Supabase project URL for Swift is:
+
+```text
+https://wppernaddlrwjgcmikyj.supabase.co
+```
+
+The `/rest/v1/` Data API URL shown in Supabase is not the value used in `SupabaseClient`.
+
 ### Create the Project
 
 1. Go to https://database.new.
@@ -265,7 +288,7 @@ create table public.event_members (
 
 create table public.snaps (
   id uuid primary key default gen_random_uuid(),
-  creator_id uuid not null references public.profiles(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
   attached_event_id uuid references public.events(id) on delete set null,
   caption text not null default '',
   location_name text not null,
@@ -432,7 +455,7 @@ to authenticated
 using (
   exists (
     select 1 from public.profiles p
-    where p.id = snaps.creator_id
+    where p.id = snaps.user_id
     and (
       p.is_private = false
       or p.id = auth.uid()
@@ -448,7 +471,7 @@ using (
 create policy "users create own snaps"
 on public.snaps for insert
 to authenticated
-with check (creator_id = auth.uid());
+with check (user_id = auth.uid());
 
 create policy "snap media readable with snap"
 on public.snap_media for select
