@@ -296,6 +296,32 @@ struct EventInsert: Encodable {
     }
 }
 
+struct EventUpdate: Encodable {
+    let title: String
+    let details: String
+    let category: String
+    let startsAt: Date
+    let endsAt: Date?
+    let locationName: String
+    let latitude: Double
+    let longitude: Double
+    let capacity: Int?
+    let isPublic: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case details
+        case category
+        case startsAt = "starts_at"
+        case endsAt = "ends_at"
+        case locationName = "location_name"
+        case latitude
+        case longitude
+        case capacity
+        case isPublic = "is_public"
+    }
+}
+
 struct EventMember: Codable, Equatable {
     let eventID: UUID
     let userID: UUID

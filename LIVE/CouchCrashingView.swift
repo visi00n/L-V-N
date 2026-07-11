@@ -21,6 +21,7 @@ struct CouchCrashingView: View {
 
     @State private var selectedTab = 0 // 0: Offering, 1: Needing
     @State private var listings: [CouchListing] = []
+    @State private var isPremiumUnlocked = false
     
     // Create new listing state
     @State private var isShowingCreateSheet = false
@@ -36,35 +37,40 @@ struct CouchCrashingView: View {
                 // Subscription Premium Map Promo Banner
                 premiumPromoBanner
 
-                Picker("Mode", selection: $selectedTab) {
-                    Text("Offers").tag(0)
-                    Text("Needs").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                if !isPremiumUnlocked {
+                    lockedPremiumPanel
+                    Spacer()
+                } else {
+                    Picker("Mode", selection: $selectedTab) {
+                        Text("Offers").tag(0)
+                        Text("Needs").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
 
-                ScrollView {
-                    VStack(spacing: 12) {
-                        let filtered = listings.filter { $0.isOffering == (selectedTab == 0) }
-                        
-                        if filtered.isEmpty {
-                            EmptyStateBlock(
-                                symbolName: "bed.double.fill",
-                                title: "No listings yet",
-                                message: selectedTab == 0 
-                                ? "Be the first to offer a couch nearby!"
-                                : "No current travelers looking for a couch."
-                            )
-                            .padding(.top, 40)
-                        } else {
-                            ForEach(filtered) { listing in
-                                listingCard(for: listing)
+                    ScrollView {
+                        VStack(spacing: 12) {
+                            let filtered = listings.filter { $0.isOffering == (selectedTab == 0) }
+
+                            if filtered.isEmpty {
+                                EmptyStateBlock(
+                                    symbolName: "bed.double.fill",
+                                    title: "No listings yet",
+                                    message: selectedTab == 0
+                                    ? "Be the first to offer a couch nearby!"
+                                    : "No current travelers looking for a couch."
+                                )
+                                .padding(.top, 40)
+                            } else {
+                                ForEach(filtered) { listing in
+                                    listingCard(for: listing)
+                                }
                             }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
                 }
             }
             .background(Color.liveCanvas)
@@ -78,10 +84,11 @@ struct CouchCrashingView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: { isShowingCreateSheet = true }) {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: isPremiumUnlocked ? "plus.circle.fill" : "lock.circle.fill")
                             .font(.system(size: 20))
-                            .foregroundStyle(Color.liveInk)
+                            .foregroundStyle(isPremiumUnlocked ? Color.liveInk : Color.liveMuted)
                     }
+                    .disabled(!isPremiumUnlocked)
                 }
             }
             .sheet(isPresented: $isShowingCreateSheet) {
@@ -131,6 +138,49 @@ struct CouchCrashingView: View {
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .shadow(color: Color.liveLavender.opacity(0.18), radius: 12, y: 6)
+    }
+
+    private var lockedPremiumPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Premium travel pack locked", systemImage: "lock.fill")
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+
+            Text("Couch crashing, premium scenic maps, host payouts, and verified 18+ trust badges need real Stripe Billing, Stripe Connect payouts, and ID verification before going live.")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+                .lineSpacing(4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("$36/year subscription through Stripe Billing", systemImage: "creditcard.fill")
+                Label("18+ identity verification before buying/hosting", systemImage: "checkmark.shield.fill")
+                Label("Host payouts through Stripe Connect, not PayPal in-app", systemImage: "banknote.fill")
+                Label("Safety check-ins before couch meetups go live", systemImage: "sos.circle.fill")
+            }
+            .font(.system(size: 12, weight: .black, design: .rounded))
+            .foregroundStyle(Color.liveInk)
+
+            Button {
+                // Keep locked until server-side Stripe products, Identity, Connect accounts,
+                // webhook persistence, and App Store review decisions are configured.
+            } label: {
+                Label("Coming after secure Stripe + ID setup", systemImage: "sparkles")
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.liveOnInk)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.liveInk.opacity(0.38), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(true)
+        }
+        .padding(16)
+        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.liveStroke, lineWidth: 1)
+        }
+        .padding(16)
     }
 
     private func listingCard(for listing: CouchListing) -> some View {

@@ -16,6 +16,7 @@ final class AuthManager: ObservableObject {
     @Published private(set) var isLoading = true
     @Published var errorMessage: String?
     @Published var appleSuggestedDisplayName: String?
+    @Published private(set) var hasAppleIdentity = false
 
     private var authStateTask: Task<Void, Never>?
 
@@ -80,9 +81,17 @@ final class AuthManager: ObservableObject {
     }
 
     func login(email: String, password: String) async {
+        await login(identifier: email, password: password)
+    }
+
+    func login(identifier: String, password: String) async {
         await performAuthAction {
+            let cleanIdentifier = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard cleanIdentifier.contains("@") else {
+                throw AuthManagerError.message("For account recovery, use your email/Gmail and password. Handle-only login needs a secure server-side username lookup before it can work.")
+            }
             let newSession = try await supabase.auth.signIn(
-                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                email: cleanIdentifier,
                 password: password
             )
             session = newSession
@@ -90,6 +99,7 @@ final class AuthManager: ObservableObject {
                 profile = fetched
                 saveProfileToCache(fetched)
             }
+            try await refreshAppleIdentityStatus()
         }
     }
 
@@ -116,6 +126,26 @@ final class AuthManager: ObservableObject {
             } else {
                 profile = nil
             }
+            try await refreshAppleIdentityStatus()
+        }
+    }
+
+    func linkAppleID(idToken: String, nonce: String, displayName: String?) async {
+        await performAuthAction {
+            let newSession = try await supabase.auth.linkIdentityWithIdToken(
+                credentials: OpenIDConnectCredentials(
+                    provider: .apple,
+                    idToken: idToken,
+                    nonce: nonce
+                )
+            )
+
+            session = newSession
+            if let cleanDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !cleanDisplayName.isEmpty {
+                appleSuggestedDisplayName = cleanDisplayName
+            }
+            hasAppleIdentity = true
+            await refreshProfile()
         }
     }
 
@@ -129,6 +159,7 @@ final class AuthManager: ObservableObject {
             try await supabase.auth.signOut()
             session = nil
             profile = nil
+            hasAppleIdentity = false
             appleSuggestedDisplayName = nil
             UserDefaults.standard.removeObject(forKey: "live_cached_profile")
         }
@@ -174,6 +205,7 @@ final class AuthManager: ObservableObject {
                 profile = fetched
                 saveProfileToCache(fetched)
             }
+            try await refreshAppleIdentityStatus()
         } catch {
             if profile == nil {
                 profile = loadProfileFromCache()
@@ -200,6 +232,7 @@ final class AuthManager: ObservableObject {
             } else {
                 profile = nil
             }
+            try await refreshAppleIdentityStatus()
             errorMessage = nil
         } catch {
             if let cached = loadProfileFromCache(), cached.id == userID {
@@ -229,6 +262,15 @@ final class AuthManager: ObservableObject {
             return cached
         }
         return nil
+    }
+
+    private func refreshAppleIdentityStatus() async throws {
+        guard session != nil else {
+            hasAppleIdentity = false
+            return
+        }
+        let identities = try await supabase.auth.userIdentities()
+        hasAppleIdentity = identities.contains { $0.provider.lowercased() == "apple" }
     }
 
     private func performAuthAction(_ action: () async throws -> Void) async {

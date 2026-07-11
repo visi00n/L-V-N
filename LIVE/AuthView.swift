@@ -11,7 +11,7 @@ import SwiftUI
 
 struct AuthView: View {
     @ObservedObject var authManager: AuthManager
-    @State private var currentNonce: String?
+    @State private var isShowingLegacyLogin = false
 
     var body: some View {
         ZStack {
@@ -46,46 +46,34 @@ struct AuthView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                SignInWithAppleButton(.signIn) { request in
-                    let nonce = AppleSignInNonce.random()
-                    currentNonce = nonce
-                    request.requestedScopes = [.fullName, .email]
-                    request.nonce = AppleSignInNonce.sha256(nonce)
-                } onCompletion: { result in
-                    switch result {
-                    case .success(let authorization):
-                        guard
-                            let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-                            let nonce = currentNonce,
-                            let tokenData = credential.identityToken,
-                            let idToken = String(data: tokenData, encoding: .utf8)
-                        else {
-                            authManager.setAuthError("Apple did not return a valid sign-in token. Try again.")
-                            return
-                        }
-
-                        let name = PersonNameComponentsFormatter.localizedString(
-                            from: credential.fullName ?? PersonNameComponents(),
-                            style: .medium
-                        )
-                        Task {
-                            await authManager.loginWithApple(
-                                idToken: idToken,
-                                nonce: nonce,
-                                displayName: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name
-                            )
-                        }
-                    case .failure(let error):
-                        authManager.setAuthError(error.localizedDescription)
-                    }
+                AppleIDAuthButton(title: .signIn) { idToken, nonce, name in
+                    await authManager.loginWithApple(idToken: idToken, nonce: nonce, displayName: name)
+                } onError: { message in
+                    authManager.setAuthError(message)
                 }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        isShowingLegacyLogin.toggle()
+                    }
+                } label: {
+                    Label("I already have an email login", systemImage: "envelope.badge.shield.half.filled")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                if isShowingLegacyLogin {
+                    LegacyLoginView(authManager: authManager)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
 
                 AuthErrorText(message: authManager.errorMessage)
 
-                Text("Existing L!V!N profile data stays in Supabase. If an old email account does not automatically map to the Apple auth user, keep the old row and migrate/link it server-side later rather than deleting anything.")
+                Text("Recover with email once, then go to Settings → Profile → Add Apple ID so your old progress stays attached to Apple login.")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.liveMuted)
                     .lineSpacing(3)
@@ -98,6 +86,90 @@ struct AuthView: View {
             }
             .padding(18)
         }
+    }
+}
+
+struct AppleIDAuthButton: View {
+    let title: SignInWithAppleButton.Label
+    let action: (String, String, String?) async -> Void
+    let onError: (String) -> Void
+
+    @State private var currentNonce: String?
+
+    var body: some View {
+        SignInWithAppleButton(title) { request in
+            let nonce = AppleSignInNonce.random()
+            currentNonce = nonce
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = AppleSignInNonce.sha256(nonce)
+        } onCompletion: { result in
+            switch result {
+            case .success(let authorization):
+                guard
+                    let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                    let nonce = currentNonce,
+                    let tokenData = credential.identityToken,
+                    let idToken = String(data: tokenData, encoding: .utf8)
+                else {
+                    onError("Apple did not return a valid sign-in token. Try again.")
+                    return
+                }
+
+                let name = PersonNameComponentsFormatter.localizedString(
+                    from: credential.fullName ?? PersonNameComponents(),
+                    style: .medium
+                )
+                Task {
+                    await action(
+                        idToken,
+                        nonce,
+                        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : name
+                    )
+                }
+            case .failure(let error):
+                onError(error.localizedDescription)
+            }
+        }
+        .signInWithAppleButtonStyle(.black)
+        .frame(height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct LegacyLoginView: View {
+    @ObservedObject var authManager: AuthManager
+    @State private var identifier = ""
+    @State private var password = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recover old account")
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveInk)
+
+            AuthTextField(title: "Email / Gmail", text: $identifier, keyboard: .emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            AuthSecureField(title: "Password", text: $password)
+
+            Button {
+                Task {
+                    await authManager.login(identifier: identifier, password: password)
+                }
+            } label: {
+                AuthButtonLabel(title: authManager.isLoading ? "Logging in..." : "Log in with email")
+            }
+            .disabled(authManager.isLoading)
+            .buttonStyle(.plain)
+
+            Text("Handle-only login is not safe to do from the iPhone app without a backend username lookup. Use your email once, then add Apple ID.")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(Color.liveSurface.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

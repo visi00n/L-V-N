@@ -6,6 +6,7 @@
 //
 
 import Combine
+import AuthenticationServices
 import CoreLocation
 import MapKit
 import PhotosUI
@@ -13,10 +14,12 @@ import Supabase
 import Storage
 import SwiftUI
 import UIKit
+import UserNotifications
 
 private enum LiveSheet: Identifiable {
     case create
     case createEvent
+    case editEvent(LiveEvent)
     case snap(LiveSnap)
     case event(LiveEvent)
     case eventSnaps(LiveEvent)
@@ -40,6 +43,8 @@ private enum LiveSheet: Identifiable {
             "create"
         case .createEvent:
             "create-event"
+        case .editEvent(let event):
+            "edit-event-\(event.id)"
         case .snap(let snap):
             "snap-\(snap.id)"
         case .event(let event):
@@ -126,15 +131,18 @@ struct ContentView: View {
         }
 
         let zoom = currentMapRegion.span.longitudeDelta
+        if zoom > 0.45 {
+            return []
+        }
         let sortedSnaps = baseSnaps.sorted(by: snapRelevanceSort)
         if zoom > 0.30 {
-            return Array(sortedSnaps.prefix(8))
+            return Array(sortedSnaps.prefix(3))
         }
         if zoom > 0.16 {
-            return Array(sortedSnaps.prefix(18))
+            return Array(sortedSnaps.prefix(8))
         }
         if zoom > 0.08 {
-            return Array(sortedSnaps.prefix(45))
+            return Array(sortedSnaps.prefix(25))
         }
         return baseSnaps
     }
@@ -160,6 +168,7 @@ struct ContentView: View {
         }
         .task {
             authManager.start()
+            requestNotificationPermission()
             checkStreak()
         }
         .onChange(of: authManager.currentUserID) { _, userID in
@@ -172,6 +181,9 @@ struct ContentView: View {
             if phase == .active {
                 checkStreak()
             }
+        }
+        .onOpenURL { url in
+            handleDeepLink(url)
         }
         .fullScreenCover(item: $fullScreenProfile) { explorer in
             ProfileSheetView(
@@ -383,6 +395,7 @@ struct ContentView: View {
                 await listenForIncomingDMs(currentUserID: profile.id)
                 await listenForFollowers(currentUserID: profile.id)
                 await OfflineSnapManager.shared.uploadPendingSnaps(viewModel: snapMapViewModel, currentProfile: profile)
+                promptAppleLinkIfNeeded()
             }
 
             Task {
@@ -397,6 +410,7 @@ struct ContentView: View {
         }
         .onChange(of: authManager.profile) { newProfile in
             if let profile = newProfile {
+                promptAppleLinkIfNeeded()
                 Task {
                     await reloadFriends()
                 }
@@ -454,6 +468,17 @@ struct ContentView: View {
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+            case .editEvent(let event):
+                EventEditView(
+                    event: event,
+                    currentProfile: authManager.profile,
+                    eventViewModel: eventViewModel,
+                    onSaved: { updated in
+                        activeSheet = .event(updated)
+                    }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             case .snap(let snap):
                 SnapDetailView(
                     initialSnap: snap,
@@ -491,6 +516,7 @@ struct ContentView: View {
                     onRoute: { route(event) },
                     onHost: { fullScreenProfile = event.host },
                     onOpenSnaps: { activeSheet = .eventSnaps(event) },
+                    onEdit: { activeSheet = .editEvent(event) },
                     onDelete: {
                         Task {
                             do {
@@ -563,6 +589,7 @@ struct ContentView: View {
                     .presentationDragIndicator(.visible)
             case .settings:
                 SettingsSheetView(
+                    authManager: authManager,
                     explorer: currentExplorer,
                     safeZones: $safeZones,
                     onProfile: {
@@ -633,6 +660,12 @@ struct ContentView: View {
                         .stroke(Color.liveInk.opacity(0.12), lineWidth: 1)
                 }
                 .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
+                .onTapGesture {
+                    if notification.title.contains("Apple ID") {
+                        activeSheet = .settings
+                        activeNotification = nil
+                    }
+                }
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .padding(.top, 58)
                 .zIndex(999)
@@ -658,6 +691,17 @@ struct ContentView: View {
 
         if tab == .map {
             centerOnUser()
+        }
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme == "livin" else { return }
+        if url.host == "camera" || url.path == "/camera" {
+            activeSheet = .create
+            selectedTab = .map
+            locationStore.requestLocation()
+        } else if url.host == "settings" {
+            activeSheet = .settings
         }
     }
 
@@ -718,6 +762,7 @@ struct ContentView: View {
     }
 
     private func showInAppNotification(title: String, message: String) {
+        scheduleLocalNotification(title: title, message: message)
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
             activeNotification = InAppNotification(title: title, message: message)
         }
@@ -728,6 +773,35 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+    }
+
+    private func scheduleLocalNotification(title: String, message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = message
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "live-\(UUID().uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    private func promptAppleLinkIfNeeded() {
+        guard authManager.isSignedIn, !authManager.hasAppleIdentity else { return }
+        let key = "live_prompted_add_apple_id_\(authManager.currentUserID?.uuidString ?? "unknown")"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        showInAppNotification(
+            title: "Add Apple ID",
+            message: "Tap here to open Settings and link Apple ID so you don’t lose your account."
+        )
     }
 
     private func checkEventEndTimes() {
@@ -2157,11 +2231,13 @@ private struct SnapMapView: View {
     private var visibleEvents: [LiveEvent] {
         guard mapMode == .public else { return [] }
         let zoom = mapRegion.span.longitudeDelta
-        if zoom > 0.15 {
+        if zoom > 0.45 {
             return []
         }
         let limit: Int
-        if zoom > 0.08 {
+        if zoom > 0.24 {
+            limit = 3
+        } else if zoom > 0.12 {
             limit = 8
         } else {
             limit = 28
@@ -2204,7 +2280,7 @@ private struct SnapMapView: View {
             }
 
             ForEach(computeClusters()) { cluster in
-                if cluster.snaps.count >= 2 && mapMode == .public {
+                if cluster.snaps.count >= 5 && mapMode == .public {
                     Annotation("", coordinate: cluster.coordinate, anchor: .bottom) {
                         SnapClusterPin(snap: cluster.snaps[0], count: cluster.snaps.count) {
                             onSelectCluster(cluster.snaps)
@@ -2228,6 +2304,7 @@ private struct SnapMapView: View {
             onMapRegionChange(context.region)
         }
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: snaps.map(\.id).joined(separator: ","))
+        .animation(.spring(response: 0.34, dampingFraction: 0.88), value: mapRegion.span.longitudeDelta)
         .mapStyle(.standard(elevation: .realistic))
         .mapControls {
             MapUserLocationButton()
@@ -3319,6 +3396,133 @@ private struct EventCreateView: View {
     }
 }
 
+private struct EventEditView: View {
+    let event: LiveEvent
+    let currentProfile: Profile?
+    @ObservedObject var eventViewModel: EventViewModel
+    let onSaved: (LiveEvent) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var category: String
+    @State private var details: String
+    @State private var startsAt: Date
+    @State private var endsAt: Date
+    @State private var locationName: String
+    @State private var latitude: Double
+    @State private var longitude: Double
+    @State private var capacityText: String
+    @State private var isPublic: Bool
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(event: LiveEvent, currentProfile: Profile?, eventViewModel: EventViewModel, onSaved: @escaping (LiveEvent) -> Void) {
+        self.event = event
+        self.currentProfile = currentProfile
+        self.eventViewModel = eventViewModel
+        self.onSaved = onSaved
+        _title = State(initialValue: event.title)
+        _category = State(initialValue: event.category)
+        _details = State(initialValue: event.details)
+        _startsAt = State(initialValue: event.startsAt ?? Date())
+        _endsAt = State(initialValue: event.endsAt ?? (event.startsAt ?? Date()).addingTimeInterval(3600))
+        _locationName = State(initialValue: event.locationName)
+        _latitude = State(initialValue: event.coordinate.latitude)
+        _longitude = State(initialValue: event.coordinate.longitude)
+        _capacityText = State(initialValue: event.capacity.map(String.init) ?? "")
+        _isPublic = State(initialValue: event.isPublic)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Event") {
+                    TextField("Title", text: $title)
+                    TextField("Category", text: $category)
+                    TextEditor(text: $details)
+                        .frame(minHeight: 110)
+                }
+
+                Section("Time") {
+                    DatePicker("Starts", selection: $startsAt, displayedComponents: [.date, .hourAndMinute])
+                    DatePicker("Ends", selection: $endsAt, in: startsAt..., displayedComponents: [.date, .hourAndMinute])
+                }
+
+                Section("Location") {
+                    TextField("Location name", text: $locationName)
+                    TextField("Latitude", value: $latitude, format: .number)
+                        .keyboardType(.decimalPad)
+                    TextField("Longitude", value: $longitude, format: .number)
+                        .keyboardType(.decimalPad)
+                }
+
+                Section("Capacity & visibility") {
+                    TextField("Capacity blank = unlimited", text: $capacityText)
+                        .keyboardType(.numberPad)
+                    Toggle("Public event", isOn: $isPublic)
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(Color.liveAlertRed)
+                    }
+                }
+            }
+            .navigationTitle("Edit Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isSaving ? "Saving..." : "Save") {
+                        Task { await save() }
+                    }
+                    .disabled(isSaving)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let currentProfile else {
+            errorMessage = "Log in before editing."
+            return
+        }
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "Title is required."
+            return
+        }
+        guard endsAt > startsAt else {
+            errorMessage = "End time must be after start time."
+            return
+        }
+        isSaving = true
+        defer { isSaving = false }
+
+        do {
+            let draft = EventDraft(
+                title: title,
+                category: category.isEmpty ? "Social" : category,
+                details: details,
+                startsAt: startsAt,
+                endsAt: endsAt,
+                locationName: locationName,
+                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                capacity: Int(capacityText.trimmingCharacters(in: .whitespacesAndNewlines)),
+                image: nil,
+                isPublic: isPublic
+            )
+            let updated = try await eventViewModel.updateEvent(eventID: event.id, draft: draft, hostProfile: currentProfile)
+            onSaved(updated)
+            dismiss()
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
 private struct EventDetailView: View {
     let event: LiveEvent
     let isJoined: Bool
@@ -3330,6 +3534,7 @@ private struct EventDetailView: View {
     let onRoute: () -> Void
     let onHost: () -> Void
     let onOpenSnaps: () -> Void
+    let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -3478,6 +3683,12 @@ private struct EventDetailView: View {
                     .buttonStyle(.plain)
                 }
 
+                ShareLink(item: eventShareText) {
+                    Label("Share Event", systemImage: "square.and.arrow.up.fill")
+                        .liveActionButton(fill: Color.liveSurfaceElevated, foreground: Color.liveInk)
+                }
+                .buttonStyle(.plain)
+
                 if !event.isPublic {
                     Label("Private event share links are not active yet. Invite token is saved for the backend deep-link flow.", systemImage: "lock.fill")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -3488,7 +3699,7 @@ private struct EventDetailView: View {
 
                 if isHost {
                     HStack(spacing: 8) {
-                        Button {} label: {
+                        Button(action: onEdit) {
                             Label("Edit Event", systemImage: "pencil")
                                 .liveActionButton(fill: Color.liveSurface, foreground: Color.liveInk)
                         }
@@ -3511,6 +3722,12 @@ private struct EventDetailView: View {
             .padding(18)
         }
         .background(BrandBackdrop().blur(radius: 8))
+    }
+
+    private var eventShareText: String {
+        let time = event.dateTimeSummary
+        let visibility = event.isPublic ? "public" : "private"
+        return "Join me at \(event.title) on L!V!N — \(time) at \(event.locationName). This is a \(visibility) event."
     }
 }
 
@@ -4091,10 +4308,12 @@ private struct CreateSnapView: View {
             return
         }
 
-        let cleanLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanLocationName.isEmpty else {
-            errorMessage = "Missing location name."
-            return
+        let typedLocationName = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLocationName: String
+        if typedLocationName.isEmpty {
+            cleanLocationName = await reverseGeocodeName(for: coordinate)
+        } else {
+            cleanLocationName = typedLocationName
         }
 
         if isPartOfEvent, let selectedEventID, let event = joinedEvents.first(where: { $0.id == selectedEventID }) {
@@ -4153,6 +4372,33 @@ private struct CreateSnapView: View {
             return 10
         }
         return 1
+    }
+
+    private func reverseGeocodeName(for coordinate: CLLocationCoordinate2D) async -> String {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let geocoder = CLGeocoder()
+
+        do {
+            let placemarks = try await geocoder.reverseGeocodeLocation(location)
+            if let placemark = placemarks.first {
+                let parts = [
+                    placemark.name,
+                    placemark.locality,
+                    placemark.administrativeArea
+                ]
+                let nameParts = parts.compactMap { value in
+                    let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return clean?.isEmpty == false ? clean : nil
+                }
+                let uniqueNameParts = Array(NSOrderedSet(array: nameParts)) as? [String] ?? nameParts
+                let displayName = uniqueNameParts.joined(separator: ", ")
+                if !displayName.isEmpty {
+                    return displayName
+                }
+            }
+        } catch {}
+
+        return String(format: "Pinned at %.4f, %.4f", coordinate.latitude, coordinate.longitude)
     }
 }
 
@@ -6173,6 +6419,7 @@ struct ImageCropperView: View {
 }
 
 private struct SettingsSheetView: View {
+    @ObservedObject var authManager: AuthManager
     let explorer: Explorer
     @Binding var safeZones: [SafeZone]
     let onProfile: () -> Void
@@ -6185,207 +6432,28 @@ private struct SettingsSheetView: View {
     @State private var selectedItem: MKMapItem?
     @State private var radius: Double = 200.0 // in meters
     @State private var searchError: String? = nil
+    @State private var selectedSection: SettingsSection = .profile
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("ACCOUNT")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.liveMuted)
-
-                        Button(action: onProfile) {
-                            HStack(spacing: 12) {
-                                ExplorerAvatar(explorer: explorer, size: 48)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(explorer.displayName)
-                                        .font(.system(size: 16, weight: .black, design: .rounded))
-                                        .foregroundStyle(Color.liveInk)
-                                    Text(explorer.handle)
-                                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                                        .foregroundStyle(Color.liveMuted)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .black))
-                                    .foregroundStyle(Color.liveMuted)
-                            }
-                            .padding(14)
-                            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 16))
-                        }
-                        .buttonStyle(.plain)
-
-                        SettingsRow(symbolName: "apple.logo", title: "Login", value: "Apple ID")
-                        SettingsRow(symbolName: "app.badge.fill", title: "App version", value: "MVP TestFlight")
-
-                        Button(action: onLogout) {
-                            Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
-                                .liveActionButton(fill: Color.liveInk, foreground: Color.liveOnInk)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(16)
-                    .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
-                    .padding(.horizontal, 16)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("What are Safe Zones?", systemImage: "shield.fill")
-                            .font(.system(size: 16, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.liveMint)
-
-                        Text("Pin addresses like your home or workplace. If you accidentally post a snap from within a Safe Zone, the location details will automatically be obfuscated by shifting it 1.5 miles away to protect your privacy.")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.liveMuted)
-                            .lineSpacing(4)
-                    }
-                    .padding(14)
-                    .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 14))
-                    .padding(.horizontal, 16)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("ADD A SAFE ZONE")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.liveMuted)
-
-                        TextField("Name (e.g. Home, Work)", text: $zoneName)
-                            .textFieldStyle(.plain)
-                            .padding(12)
-                            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-
-                        HStack(spacing: 8) {
-                            TextField("Search address...", text: $searchQuery)
-                                .textFieldStyle(.plain)
-                                .padding(12)
-                                .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-
-                            Button(action: performSearch) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 16, weight: .black))
-                                    .foregroundStyle(Color.liveOnInk)
-                                    .frame(width: 44, height: 44)
-                                    .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 10))
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if let searchError {
-                            Text(searchError)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(Color.liveAlertRed)
-                        }
-
-                        if !searchResults.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
-                                ForEach(searchResults.prefix(4), id: \.self) { item in
-                                    Button(action: {
-                                        selectedItem = item
-                                        searchQuery = item.placemark.title ?? item.name ?? ""
-                                        searchResults = []
-                                    }) {
-                                        HStack {
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(item.name ?? "Unknown Place")
-                                                    .font(.system(size: 13, weight: .bold))
-                                                    .foregroundStyle(Color.liveInk)
-                                                if let subtitle = item.placemark.title {
-                                                    Text(subtitle)
-                                                        .font(.system(size: 11, weight: .medium))
-                                                        .foregroundStyle(Color.liveMuted)
-                                                        .lineLimit(1)
-                                                }
-                                            }
-                                            Spacer()
-                                            if selectedItem == item {
-                                                Image(systemName: "checkmark")
-                                                    .foregroundStyle(Color.liveMint)
-                                            }
-                                        }
-                                        .padding(.vertical, 8)
-                                        .padding(.horizontal, 10)
-                                        .background(Color.liveSurfaceElevated.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text("Radius:")
-                                    .font(.system(size: 13, weight: .black))
-                                Spacer()
-                                Text("\(Int(radius)) meters")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(Color.liveMint)
-                            }
-                            Slider(value: $radius, in: 100...1000, step: 50)
-                                .tint(Color.liveMint)
-                        }
-                        .padding(.top, 8)
-
-                        Button(action: addSafeZone) {
-                            Text("Save Safe Zone")
-                                .font(.system(size: 14, weight: .black, design: .rounded))
-                                .foregroundStyle(Color.liveOnInk)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background((zoneName.isEmpty || selectedItem == nil) ? Color.liveInk.opacity(0.3) : Color.liveInk, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .disabled(zoneName.isEmpty || selectedItem == nil)
-                        .buttonStyle(.plain)
-                    }
-                    .padding(16)
-                    .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
-                    .padding(.horizontal, 16)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("ACTIVE SAFE ZONES")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(Color.liveMuted)
-
-                        if safeZones.isEmpty {
-                            Text("No Safe Zones set. Your exact coordinates will be shared on all snaps.")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundStyle(Color.liveMuted)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 20)
-                        } else {
-                            ForEach(safeZones) { zone in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(zone.name)
-                                            .font(.system(size: 14, weight: .black, design: .rounded))
-                                            .foregroundStyle(Color.liveInk)
-                                        Text("\(Int(zone.radius))m radius")
-                                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                                            .foregroundStyle(Color.liveMint)
-                                    }
-                                    Spacer()
-                                    Button(action: {
-                                        safeZones.removeAll { $0.id == zone.id }
-                                    }) {
-                                        Image(systemName: "trash.fill")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(Color.liveAlertRed)
-                                            .frame(width: 32, height: 32)
-                                            .background(Color.liveAlertRed.opacity(0.12), in: Circle())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(12)
-                                .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
-                            }
+                    Picker("Settings section", selection: $selectedSection) {
+                        ForEach(SettingsSection.allCases) { section in
+                            Text(section.title).tag(section)
                         }
                     }
-                    .padding(16)
-                    .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
+                    .pickerStyle(.segmented)
                     .padding(.horizontal, 16)
+
+                    switch selectedSection {
+                    case .profile:
+                        profileSettings
+                    case .safetyZone:
+                        safetyZoneSettings
+                    case .app:
+                        appSettings
+                    }
                 }
                 .padding(.vertical, 20)
             }
@@ -6400,6 +6468,242 @@ private struct SettingsSheetView: View {
                 }
             }
         }
+    }
+
+    private var profileSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("PROFILE")
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+
+            Button(action: onProfile) {
+                HStack(spacing: 12) {
+                    ExplorerAvatar(explorer: explorer, size: 48)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(explorer.displayName)
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.liveInk)
+                        Text(explorer.handle)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.liveMuted)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .black))
+                        .foregroundStyle(Color.liveMuted)
+                }
+                .padding(14)
+                .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 16))
+            }
+            .buttonStyle(.plain)
+
+            SettingsRow(
+                symbolName: "apple.logo",
+                title: "Apple ID",
+                value: authManager.hasAppleIdentity ? "Connected" : "Not connected"
+            )
+
+            if !authManager.hasAppleIdentity {
+                AppleIDAuthButton(title: .continue) { idToken, nonce, name in
+                    await authManager.linkAppleID(idToken: idToken, nonce: nonce, displayName: name)
+                } onError: { message in
+                    authManager.setAuthError(message)
+                }
+                Text("Add Apple ID after logging into your old account so your existing handle, snaps, follows, and events stay attached.")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.liveMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let message = authManager.errorMessage {
+                Text(message)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.liveAlertRed)
+            }
+
+            Button(action: onLogout) {
+                Label("Log out", systemImage: "rectangle.portrait.and.arrow.right")
+                    .liveActionButton(fill: Color.liveInk, foreground: Color.liveOnInk)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+    }
+
+    private var safetyZoneSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("What are Safe Zones?", systemImage: "shield.fill")
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.liveMint)
+
+                Text("Pin addresses like your home or workplace. If you accidentally post a snap from within a Safe Zone, the location details will automatically be obfuscated by shifting it 1.5 miles away to protect your privacy.")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.liveMuted)
+                    .lineSpacing(4)
+            }
+            .padding(14)
+            .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 14))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("ADD A SAFE ZONE")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.liveMuted)
+
+                TextField("Name (e.g. Home, Work)", text: $zoneName)
+                    .textFieldStyle(.plain)
+                    .padding(12)
+                    .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+
+                HStack(spacing: 8) {
+                    TextField("Search address...", text: $searchQuery)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+
+                    Button(action: performSearch) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .black))
+                            .foregroundStyle(Color.liveOnInk)
+                            .frame(width: 44, height: 44)
+                            .background(Color.liveInk, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let searchError {
+                    Text(searchError)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.liveAlertRed)
+                }
+
+                if !searchResults.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(searchResults.prefix(4), id: \.self) { item in
+                            Button(action: {
+                                selectedItem = item
+                                searchQuery = item.placemark.title ?? item.name ?? ""
+                                searchResults = []
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name ?? "Unknown Place")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundStyle(Color.liveInk)
+                                        if let subtitle = item.placemark.title {
+                                            Text(subtitle)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(Color.liveMuted)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    if selectedItem == item {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.liveMint)
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .background(Color.liveSurfaceElevated.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Radius:")
+                            .font(.system(size: 13, weight: .black))
+                        Spacer()
+                        Text("\(Int(radius)) meters")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.liveMint)
+                    }
+                    Slider(value: $radius, in: 100...1000, step: 50)
+                        .tint(Color.liveMint)
+                }
+                .padding(.top, 8)
+
+                Button(action: addSafeZone) {
+                    Text("Save Safe Zone")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.liveOnInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background((zoneName.isEmpty || selectedItem == nil) ? Color.liveInk.opacity(0.3) : Color.liveInk, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(zoneName.isEmpty || selectedItem == nil)
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("ACTIVE SAFE ZONES")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.liveMuted)
+
+                if safeZones.isEmpty {
+                    Text("No Safe Zones set. Your exact coordinates will be shared on all snaps.")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.liveMuted)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 20)
+                } else {
+                    ForEach(safeZones) { zone in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(zone.name)
+                                    .font(.system(size: 14, weight: .black, design: .rounded))
+                                    .foregroundStyle(Color.liveInk)
+                                Text("\(Int(zone.radius))m radius")
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.liveMint)
+                            }
+                            Spacer()
+                            Button(action: {
+                                safeZones.removeAll { $0.id == zone.id }
+                            }) {
+                                Image(systemName: "trash.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(Color.liveAlertRed)
+                                    .frame(width: 32, height: 32)
+                                    .background(Color.liveAlertRed.opacity(0.12), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(12)
+                        .background(Color.liveSurfaceElevated, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+            .padding(16)
+            .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private var appSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("APP")
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(Color.liveMuted)
+            SettingsRow(symbolName: "app.badge.fill", title: "App version", value: "MVP TestFlight")
+            SettingsRow(symbolName: "bell.badge.fill", title: "Notifications", value: "In-app active")
+            SettingsRow(symbolName: "camera.aperture", title: "Camera shortcut", value: "Deep link ready")
+        }
+        .padding(16)
+        .background(Color.liveSurface, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
     }
 
     private func performSearch() {
@@ -6437,6 +6741,25 @@ private struct SettingsSheetView: View {
         searchQuery = ""
         selectedItem = nil
         searchResults = []
+    }
+}
+
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case profile
+    case safetyZone
+    case app
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .profile:
+            "Profile"
+        case .safetyZone:
+            "Safety Zone"
+        case .app:
+            "App"
+        }
     }
 }
 

@@ -148,6 +148,34 @@ final class EventService {
             .execute()
     }
 
+    func updateEvent(eventID: UUID, draft: EventDraft, hostProfile: Profile) async throws -> LiveEvent {
+        let update = EventUpdate(
+            title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            details: draft.details.trimmingCharacters(in: .whitespacesAndNewlines),
+            category: draft.category.trimmingCharacters(in: .whitespacesAndNewlines),
+            startsAt: draft.startsAt,
+            endsAt: draft.endsAt,
+            locationName: draft.locationName.trimmingCharacters(in: .whitespacesAndNewlines),
+            latitude: draft.coordinate.latitude,
+            longitude: draft.coordinate.longitude,
+            capacity: draft.capacity,
+            isPublic: draft.isPublic
+        )
+
+        let eventResponse: PostgrestResponse<[Event]> = try await supabase
+            .from("events")
+            .update(update)
+            .eq("id", value: eventID)
+            .select()
+            .execute()
+
+        guard let event = eventResponse.value.first else {
+            throw EventServiceError.message("Event was not returned after saving.")
+        }
+
+        return event.liveEvent(host: hostProfile, attendeeCount: 1, isSignedUp: true)
+    }
+
     func deleteEvent(eventID: UUID) async throws {
         try await supabase
             .from("events")
@@ -202,6 +230,15 @@ final class EventViewModel: ObservableObject {
         let event = try await eventService.createEvent(draft: draft, hostProfile: hostProfile)
         upsert(event)
         joinedEventIDs.insert(event.id)
+        return event
+    }
+
+    func updateEvent(eventID: String, draft: EventDraft, hostProfile: Profile) async throws -> LiveEvent {
+        guard let uuid = UUID(uuidString: eventID) else {
+            throw EventServiceError.message("This event cannot be edited locally.")
+        }
+        let event = try await eventService.updateEvent(eventID: uuid, draft: draft, hostProfile: hostProfile)
+        upsert(event)
         return event
     }
 
